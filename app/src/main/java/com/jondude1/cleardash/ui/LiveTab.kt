@@ -56,7 +56,7 @@ fun LiveTab() {
             Modifier
                 .padding(horizontal = 16.dp)
                 .fillMaxWidth()
-                .aspectRatio(1.9f)
+                .aspectRatio(5f / 3f) // CX-5 screen: 800×480
                 .clip(RoundedCornerShape(18.dp))
                 .border(1.dp, C.edge, RoundedCornerShape(18.dp))
                 .clickableNoRipple { mode = DashMode.entries[(mode.ordinal + 1) % DashMode.entries.size] }
@@ -73,7 +73,7 @@ fun LiveTab() {
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Segmented(listOf("Dash", "Gauges", "Tires"), mode.ordinal) { mode = DashMode.entries[it] }
-            Text("Same view as the car", color = C.muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+            Text("Exactly what your CX-5 shows", color = C.muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
         }
 
         if (state.activeAlerts.isNotEmpty()) {

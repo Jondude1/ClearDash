@@ -107,6 +107,8 @@ fun SetupTab() {
     ) {
         PermissionsCard(recheck) { recheck++ }
         AndroidAutoCard()
+        KnobCard()
+        VehicleCard(prefsVersion)
         ObdCard(prefsVersion)
         TiresCard(prefsVersion)
         HomeAssistantCard()
@@ -162,7 +164,7 @@ private fun AndroidAutoCard() {
             "Open Settings → search \"Android Auto\" → open it.",
             "Scroll down and tap \"Version\" 10 times, then OK to enable developer settings.",
             "Tap ⋮ (top right) → Developer settings → turn on \"Unknown sources\".",
-            "Connect to the car. ClearDash shows up in the app launcher — tap it once and Android Auto remembers it.",
+            "Connect to the car. ClearDash shows up in the Android Auto app launcher — pick it with the knob once and Android Auto remembers it.",
         )
         steps.forEachIndexed { i, s ->
             Row {
@@ -171,6 +173,48 @@ private fun AndroidAutoCard() {
             }
         }
         Hint("Google Maps keeps navigating in the background while ClearDash is on screen — its next turn appears on the dash.")
+    }
+}
+
+@Composable
+private fun KnobCard() {
+    SectionCard("Commander knob", "Mazda locks the touchscreen while you drive, so everything works from the knob.") {
+        val tips = listOf(
+            "Nudge" to "Move between the side buttons — Drive, Gauges, Tires, Home — and the media buttons.",
+            "Press" to "Select the highlighted button.",
+            "Turn" to "Select the ✥ move button, then turn the knob to flip between Drive, Gauges and Tires.",
+            "Back" to "The Back button by the knob leaves the Home controls.",
+        )
+        tips.forEach { (k, v) ->
+            Row {
+                Text(k, color = C.cyan, fontWeight = FontWeight.Medium, fontSize = 14.sp, modifier = Modifier.width(56.dp))
+                Text(v, color = C.text, fontSize = 14.sp, lineHeight = 19.sp)
+            }
+        }
+        Hint("Parked, you can also tap the dashboard to flip views.")
+    }
+}
+
+@Composable
+private fun VehicleCard(prefsVersion: Int) {
+    var name by remember { mutableStateOf(Prefs.carName) }
+    var target by remember { mutableFloatStateOf(Prefs.targetPsi.toFloat()) }
+    SectionCard("Vehicle", "Tuned for the 2018 Mazda CX-5") {
+        OutlinedTextField(
+            value = name, onValueChange = { name = it; Prefs.carName = it }, singleLine = true,
+            label = { Text("Name shown on the dash") }, modifier = Modifier.fillMaxWidth(),
+        )
+        Text("Door-sticker tire pressure: ${target.roundToInt()} PSI", color = C.text, fontSize = 14.sp)
+        Slider(value = target, onValueChange = { target = it }, onValueChangeFinished = { Prefs.targetPsi = target.roundToInt() },
+            valueRange = 30f..44f, steps = 13)
+        Text("Fuel tank", color = C.text, fontSize = 14.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(14.8f to "14.8 gal · FWD", 15.3f to "15.3 gal · AWD").forEach { (gal, label) ->
+                val on = Prefs.tankGal == gal
+                Pill(label, if (on) C.cyan else C.muted) { Prefs.tankGal = gal }
+            }
+        }
+        Hint("Used for the gallons-left estimate. Check the sticker on your driver's door jamb for tire pressure.")
     }
 }
 

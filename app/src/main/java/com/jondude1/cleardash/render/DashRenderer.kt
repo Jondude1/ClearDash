@@ -4,10 +4,11 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
-import android.graphics.Path
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffColorFilter
+import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
@@ -18,6 +19,7 @@ import com.jondude1.cleardash.data.TireReading
 import com.jondude1.cleardash.data.VehicleState
 import com.jondude1.cleardash.data.Wheel
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import kotlin.math.cos
@@ -26,28 +28,37 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
-enum class DashMode { DASH, GAUGES, TIRES }
+enum class DashMode(val title: String) { DASH("DRIVE"), GAUGES("GAUGES"), TIRES("TIRES") }
 
 /**
- * Draws every ClearDash view onto a plain Canvas. Used by the Android Auto
- * surface and by the live preview on the phone, so both look identical.
+ * Draws every ClearDash view onto a plain Canvas — the Android Auto surface and the
+ * phone preview use this same code, so they look identical.
+ *
+ * Tuned for the 2018 CX-5's 7" 800×480 Mazda Connect screen: one restrained accent
+ * (Soul Red), warm silver type, hairlines instead of heavy boxes, and nothing smaller
+ * than is readable at arm's length.
  */
 class DashRenderer {
 
     object Pal {
-        val BG = Color.parseColor("#06080B")
-        val CARD = Color.parseColor("#0D1218")
-        val CARD_EDGE = Color.parseColor("#18212B")
-        val TEXT = Color.parseColor("#F2F6FA")
-        val MUTED = Color.parseColor("#7F8C9B")
-        val DIM = Color.parseColor("#1C2631")
-        val CYAN = Color.parseColor("#39D0FF")
-        val TEAL = Color.parseColor("#2FE6C8")
-        val GREEN = Color.parseColor("#3DDC97")
-        val AMBER = Color.parseColor("#FFB547")
-        val RED = Color.parseColor("#FF5468")
+        val BG_TOP = Color.parseColor("#0C0D10")
+        val BG_BOTTOM = Color.parseColor("#040405")
+        val PANEL_TOP = Color.parseColor("#17191D")
+        val PANEL_BOTTOM = Color.parseColor("#0E1013")
+        val HAIRLINE = Color.parseColor("#2A2C31")
+        val TRACK = Color.parseColor("#24262B")
+        val TEXT = Color.parseColor("#F4F1EC")
+        val TEXT2 = Color.parseColor("#CFCAC2")
+        val SILVER = Color.parseColor("#9A968F")
+        val DIM = Color.parseColor("#4A4B4F")
+        val RED = Color.parseColor("#E0283A")     // Soul Red, bright
+        val RED_DEEP = Color.parseColor("#7E0C17")  // Soul Red, shadow
+        val AMBER = Color.parseColor("#F2A93B")
+        val ALARM = Color.parseColor("#FF4D4D")
+        val OK = Color.parseColor("#CFCAC2")
     }
 
+    private val thin = Typeface.create("sans-serif-thin", Typeface.NORMAL)
     private val light = Typeface.create("sans-serif-light", Typeface.NORMAL)
     private val regular = Typeface.create("sans-serif", Typeface.NORMAL)
     private val medium = Typeface.create("sans-serif-medium", Typeface.NORMAL)
@@ -59,132 +70,736 @@ class DashRenderer {
     private val bmpPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val r = RectF()
     private val r2 = RectF()
-    private val clipPath = Path()
+    private val path = Path()
     private val clock = SimpleDateFormat("h:mm", Locale.US)
     private val ampm = SimpleDateFormat("a", Locale.US)
-    private val dateFmt = SimpleDateFormat("EEEE, MMM d", Locale.US)
+    private val dateFmt = SimpleDateFormat("EEEE, MMMM d", Locale.US)
 
     private var shownSpeed = 0f
-    private var u = 1f // one layout unit = 1% of the drawing height
+    private var lastMode: DashMode? = null
+    private var modeChangedAt = 0L
+    private var u = 1f // one layout unit ≈ 1% of drawing height
 
-    fun draw(c: Canvas, area: RectF, fullW: Int, fullH: Int, s: VehicleState, mode: DashMode) {
-        c.drawColor(Pal.BG)
+    fun draw(c: Canvas, area: RectF, fullW: Int, fullH: Int, s: VehicleState, mode: DashMode, knobHint: Boolean = false) {
+        // background over the whole surface (also behind Android Auto's own chrome)
+        fill.shader = LinearGradient(0f, 0f, 0f, fullH.toFloat(), Pal.BG_TOP, Pal.BG_BOTTOM, Shader.TileMode.CLAMP)
+        c.drawRect(0f, 0f, fullW.toFloat(), fullH.toFloat(), fill)
+        fill.shader = null
+
         val target = s.bestSpeed ?: 0f
-        shownSpeed += (target - shownSpeed) * 0.25f
+        shownSpeed += (target - shownSpeed) * 0.22f
         if (area.width() < 10 || area.height() < 10) return
-        u = min(area.height() / 100f, area.width() / 170f)
-        when (mode) {
-            DashMode.DASH -> drawDash(c, area, s)
-            DashMode.GAUGES -> drawGauges(c, area, s)
-            DashMode.TIRES -> drawTires(c, area, s)
+        u = min(area.height() / 100f, area.width() / 172f)
+
+        val now = System.currentTimeMillis()
+        if (mode != lastMode) {
+            if (lastMode != null) modeChangedAt = now
+            lastMode = mode
         }
+
+        val stripH = 9f * u
+        drawTopStrip(c, RectF(area.left, area.top, area.right, area.top + stripH), s, mode, knobHint)
+        val body = RectF(area.left, area.top + stripH, area.right, area.bottom)
+
+        // gentle cross-fade when switching views
+        val t = ((now - modeChangedAt) / 220f).coerceIn(0f, 1f)
+        val save = if (t < 1f) c.saveLayerAlpha(body, (255 * t).toInt()) else -1
+        when (mode) {
+            DashMode.DASH -> drawDash(c, body, s)
+            DashMode.GAUGES -> drawGauges(c, body, s)
+            DashMode.TIRES -> drawTires(c, body, s)
+        }
+        if (save >= 0) c.restoreToCount(save)
     }
 
-    // ───────────────────────── DASH ─────────────────────────
+    // ───────────────────────── top strip ─────────────────────────
+
+    private fun drawTopStrip(c: Canvas, b: RectF, s: VehicleState, mode: DashMode, knobHint: Boolean) {
+        val pad = 4.5f * u
+        val y = b.centerY() + 1.6f * u
+        text.typeface = medium
+        text.textSize = 3.2f * u
+        text.letterSpacing = 0.22f
+        var x = b.left + pad
+        if (knobHint) {
+            text.color = Pal.TEXT
+            c.drawText("TURN THE KNOB TO SWITCH VIEWS", x, y, text)
+        } else {
+            for (m in DashMode.entries) {
+                val active = m == mode
+                text.color = if (active) Pal.TEXT else withAlpha(Pal.SILVER, 150)
+                c.drawText(m.title, x, y, text)
+                val w = text.measureText(m.title)
+                if (active) {
+                    fill.color = Pal.RED
+                    r.set(x, y + 1.6f * u, x + w - text.letterSpacing * text.textSize, y + 2.1f * u)
+                    c.drawRoundRect(r, 0.3f * u, 0.3f * u, fill)
+                }
+                x += w + 4.5f * u
+            }
+        }
+
+        // status, right aligned
+        val items = listOf(
+            "GPS" to s.gpsOk,
+            "OBD" to s.obd.connected,
+            "TIRES" to s.tires.values.any { System.currentTimeMillis() - it.seenAt < 120_000 },
+            "HOME" to (s.haStatus == "Connected"),
+        )
+        text.typeface = medium
+        text.textSize = 2.8f * u
+        text.letterSpacing = 0.18f
+        var rx = b.right - pad
+        for ((label, ok) in items.reversed()) {
+            val w = text.measureText(label)
+            text.color = if (ok) Pal.SILVER else withAlpha(Pal.SILVER, 80)
+            c.drawText(label, rx - w, y, text)
+            fill.color = if (ok) Pal.OK else Pal.DIM
+            c.drawCircle(rx - w - 1.8f * u, y - 0.95f * u, 0.65f * u, fill)
+            rx -= w + 5.4f * u
+        }
+        text.letterSpacing = 0f
+    }
+
+    // ───────────────────────── DRIVE ─────────────────────────
 
     private fun drawDash(c: Canvas, a: RectF, s: VehicleState) {
-        val p = 4 * u
-        val inner = RectF(a.left + p, a.top + p, a.right - p, a.bottom - p)
-        val ringSize = min(inner.height(), inner.width() * 0.42f)
+        val p = 4.5f * u
+        val inner = RectF(a.left + p, a.top + 1f * u, a.right - p, a.bottom - p)
+        val ringSize = min(inner.height(), inner.width() * 0.43f)
         val ringBox = RectF(inner.left, inner.centerY() - ringSize / 2, inner.left + ringSize, inner.centerY() + ringSize / 2)
-        drawSpeedRing(c, ringBox, s)
+        drawSpeedDial(c, ringBox, s)
 
         val right = RectF(ringBox.right + p, inner.top, inner.right, inner.bottom)
         if (right.width() < 30 * u) return
-        val gap = p * 0.75f
-        val media = s.media
-        val navH = right.height() * (if (media != null) 0.40f else 0.56f)
-        val navBox = RectF(right.left, right.top, right.right, right.top + navH)
-        drawNavCard(c, navBox, s)
+        panel(c, right)
 
-        var rowTop = navBox.bottom + gap
-        if (media != null) {
-            val mh = right.height() * 0.25f
-            drawMediaCard(c, RectF(right.left, rowTop, right.right, rowTop + mh), media)
-            rowTop += mh + gap
+        val ip = 4f * u
+        val content = RectF(right.left + ip, right.top + ip * 0.8f, right.right - ip, right.bottom - ip * 0.6f)
+
+        // alert takes the top of the panel
+        val alert = s.activeAlerts.maxByOrNull { it.severity.ordinal }
+        var top = content.top
+        if (alert != null) {
+            val h = 9.5f * u
+            drawAlert(c, RectF(content.left, top, content.right, top + h), alert.title, alert.message, alert.severity)
+            top += h + 2.4f * u
         }
-        val half = (right.width() - gap) / 2
-        drawTireMini(c, RectF(right.left, rowTop, right.left + half, right.bottom), s)
-        drawEngineMini(c, RectF(right.right - half, rowTop, right.right, right.bottom), s)
+
+        val statsH = 17f * u
+        val statsBox = RectF(content.left, content.bottom - statsH, content.right, content.bottom)
+        val media = s.media
+        val avail = statsBox.top - top - 2 * 2.4f * u
+        val mediaH = if (media != null) min(avail * 0.44f, 22f * u) else 0f
+        val navBox = RectF(content.left, top, content.right, top + avail - mediaH - (if (media != null) 2.4f * u else 0f))
+        drawNav(c, navBox, s)
+
+        if (media != null) {
+            hairline(c, content.left, navBox.bottom + 1.2f * u, content.right)
+            drawMedia(c, RectF(content.left, navBox.bottom + 2.4f * u, content.right, navBox.bottom + 2.4f * u + mediaH), media)
+        }
+        hairline(c, content.left, statsBox.top - 2.4f * u, content.right)
+        drawStats(c, statsBox, s)
     }
 
-    private fun drawMediaCard(c: Canvas, b: RectF, m: MediaInfo) {
-        card(c, b)
-        val pad = 2.4f * u
-        val artSize = b.height() - 2 * pad
-        val art = RectF(b.left + pad, b.top + pad, b.left + pad + artSize, b.top + pad + artSize)
-        val radius = 2.2f * u
+    private fun drawSpeedDial(c: Canvas, box: RectF, s: VehicleState) {
+        val cx = box.centerX()
+        val cy = box.centerY() + box.height() * 0.03f
+        val rad = box.width() / 2 - 3.5f * u
+        val limit = s.speedLimitMph
+        val speed = shownSpeed
+        val maxSpeed = if (speed > 95) 140f else 100f
+        val over = limit != null && speed > limit + 2
+        val wayOver = limit != null && speed > limit + 9
+        val hot = if (wayOver) Pal.ALARM else if (over) Pal.AMBER else Pal.RED
+
+        // ambient glow behind the dial
+        val glowA = (24 + min(speed, 80f) * 0.5f).toInt()
+        fill.shader = RadialGradient(cx, cy, rad * 1.1f, withAlpha(hot, glowA), withAlpha(hot, 0), Shader.TileMode.CLAMP)
+        c.drawCircle(cx, cy, rad * 1.1f, fill)
+        fill.shader = null
+
+        // inner disc
+        fill.shader = RadialGradient(cx, cy - rad * 0.3f, rad, Color.parseColor("#1A1C20"), Color.parseColor("#08090B"), Shader.TileMode.CLAMP)
+        c.drawCircle(cx, cy, rad * 0.80f, fill)
+        fill.shader = null
+        stroke.strokeWidth = 0.25f * u
+        stroke.color = Pal.HAIRLINE
+        c.drawCircle(cx, cy, rad * 0.80f, stroke)
+
+        r.set(cx - rad, cy - rad, cx + rad, cy + rad)
+        stroke.strokeWidth = 1.0f * u
+        stroke.color = Pal.TRACK
+        c.drawArc(r, 150f, 240f, false, stroke)
+
+        // ticks + numerals
+        text.typeface = regular
+        text.textSize = 2.9f * u
+        text.textAlign = Paint.Align.CENTER
+        val steps = (maxSpeed / 10).toInt()
+        for (i in 0..steps) {
+            val v = i * 10
+            val ang = Math.toRadians(150.0 + 240.0 * v / maxSpeed)
+            val major = (v % 20 == 0)
+            val ro = rad - 2.6f * u
+            val ri = rad - (if (major) 4.6f else 3.6f) * u
+            stroke.strokeWidth = (if (major) 0.45f else 0.3f) * u
+            stroke.color = if (major) Pal.SILVER else withAlpha(Pal.SILVER, 110)
+            c.drawLine(cx + (ro * cos(ang)).toFloat(), cy + (ro * sin(ang)).toFloat(),
+                cx + (ri * cos(ang)).toFloat(), cy + (ri * sin(ang)).toFloat(), stroke)
+            if (major && v > 0 && v < maxSpeed) {
+                val rn = rad - 8.0f * u
+                text.color = withAlpha(Pal.SILVER, 170)
+                c.drawText(v.toString(), cx + (rn * cos(ang)).toFloat(), cy + (rn * sin(ang)).toFloat() + 1.0f * u, text)
+            }
+        }
+
+        // speed-limit notch on the bezel
+        if (limit != null && limit <= maxSpeed) {
+            val ang = Math.toRadians(150.0 + 240.0 * limit / maxSpeed)
+            stroke.strokeWidth = 0.6f * u
+            stroke.color = Pal.TEXT
+            val ro = rad + 1.8f * u
+            val ri = rad - 1.8f * u
+            c.drawLine(cx + (ro * cos(ang)).toFloat(), cy + (ro * sin(ang)).toFloat(),
+                cx + (ri * cos(ang)).toFloat(), cy + (ri * sin(ang)).toFloat(), stroke)
+        }
+
+        // progress arc: soft bloom underneath, crisp line on top, bright tip
+        val sweep = (240f * (speed / maxSpeed)).coerceIn(0f, 240f)
+        if (sweep > 0.3f) {
+            stroke.color = withAlpha(hot, 55)
+            stroke.strokeWidth = 4.2f * u
+            c.drawArc(r, 150f, sweep, false, stroke)
+            stroke.shader = LinearGradient(r.left, r.bottom, r.right, r.top,
+                if (over) hot else Pal.RED_DEEP, hot, Shader.TileMode.CLAMP)
+            stroke.strokeWidth = 1.6f * u
+            c.drawArc(r, 150f, sweep, false, stroke)
+            stroke.shader = null
+            val ang = Math.toRadians(150.0 + sweep)
+            val tx = cx + (rad * cos(ang)).toFloat()
+            val ty = cy + (rad * sin(ang)).toFloat()
+            fill.color = withAlpha(hot, 90)
+            c.drawCircle(tx, ty, 2.4f * u, fill)
+            fill.color = Color.WHITE
+            c.drawCircle(tx, ty, 1.0f * u, fill)
+        }
+
+        // the number
+        val shown = if (s.bestSpeed == null) "––" else speed.roundToInt().toString()
+        text.typeface = thin
+        text.textSize = rad * 0.70f
+        text.color = if (wayOver) Pal.ALARM else if (over) Pal.AMBER else Pal.TEXT
+        c.drawText(shown, cx, cy + text.textSize * 0.30f, text)
+        text.typeface = medium
+        text.textSize = 3.0f * u
+        text.letterSpacing = 0.35f
+        text.color = Pal.SILVER
+        c.drawText("MPH", cx + text.letterSpacing * text.textSize / 2, cy + rad * 0.36f, text)
+        text.letterSpacing = 0f
+
+        // speed limit sign, nested in the dial's open bottom
+        if (limit != null) {
+            val w = 11f * u
+            val h = 13.6f * u
+            r2.set(cx - w / 2, cy + rad * 0.60f, cx + w / 2, cy + rad * 0.60f + h)
+            if (r2.bottom > box.bottom + 3f * u) r2.offset(0f, box.bottom + 3f * u - r2.bottom)
+            if (over) {
+                fill.color = withAlpha(hot, 110)
+                r.set(r2.left - 1f * u, r2.top - 1f * u, r2.right + 1f * u, r2.bottom + 1f * u)
+                c.drawRoundRect(r, 2.2f * u, 2.2f * u, fill)
+            }
+            fill.color = Color.parseColor("#F7F5F0")
+            c.drawRoundRect(r2, 1.5f * u, 1.5f * u, fill)
+            stroke.strokeWidth = 0.4f * u
+            stroke.color = Color.parseColor("#111111")
+            r.set(r2.left + 0.8f * u, r2.top + 0.8f * u, r2.right - 0.8f * u, r2.bottom - 0.8f * u)
+            c.drawRoundRect(r, 1.0f * u, 1.0f * u, stroke)
+            text.color = Color.parseColor("#111111")
+            text.typeface = condensed
+            text.textSize = 2.2f * u
+            c.drawText("SPEED", r2.centerX(), r2.top + 3.6f * u, text)
+            c.drawText("LIMIT", r2.centerX(), r2.top + 5.9f * u, text)
+            text.textSize = 6.4f * u
+            c.drawText(limit.toString(), r2.centerX(), r2.bottom - 1.8f * u, text)
+        } else if (!s.gpsOk) {
+            text.typeface = medium
+            text.textSize = 2.8f * u
+            text.letterSpacing = 0.2f
+            text.color = Pal.SILVER
+            c.drawText("ACQUIRING GPS", cx, cy + rad * 0.66f, text)
+            text.letterSpacing = 0f
+        }
+        text.textAlign = Paint.Align.LEFT
+    }
+
+    private fun drawNav(c: Canvas, b: RectF, s: VehicleState) {
+        val nav = s.nav?.takeIf { System.currentTimeMillis() - it.updatedAt < 5 * 60_000 }
+        val h = b.height()
+        if (nav != null) {
+            val d = min(h * 0.74f, 19f * u)
+            val icx = b.left + d / 2
+            val icy = b.top + min(d / 2 + 0.6f * u, h / 2)
+            fill.color = Color.parseColor("#202227")
+            c.drawCircle(icx, icy, d / 2, fill)
+            stroke.strokeWidth = 0.45f * u
+            stroke.color = Pal.RED
+            c.drawCircle(icx, icy, d / 2, stroke)
+            r.set(icx - d / 2, icy - d / 2, icx + d / 2, icy + d / 2)
+            nav.icon?.let { drawTinted(c, it, r, 0.22f) }
+
+            val tx = b.left + d + 4f * u
+            val tw = b.right - tx
+            val distSize = min(10.5f * u, h * 0.42f)
+            text.typeface = light
+            text.textSize = distSize
+            text.color = Pal.TEXT
+            val distBase = b.top + distSize * 0.86f
+            c.drawText(fit(nav.distance.ifEmpty { "Next" }, tw), tx, distBase, text)
+            text.typeface = regular
+            text.textSize = 4.3f * u
+            text.color = Pal.TEXT2
+            val lines = if (h > 26f * u) 2 else 1
+            wrap(c, nav.instruction, tx, distBase + 6.0f * u, tw, lines, 5.6f * u)
+            if (nav.eta.isNotEmpty() && h > 22f * u) {
+                caps(c, nav.eta.uppercase(), tx, b.bottom - 0.4f * u, tw, Pal.SILVER)
+            }
+        } else {
+            val now = Date()
+            val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+            val greet = when (hour) { in 5..11 -> "GOOD MORNING"; in 12..16 -> "GOOD AFTERNOON"; else -> "GOOD EVENING" }
+            caps(c, greet, b.left, b.top + 3.2f * u, b.width(), Pal.SILVER)
+            val clockSize = min(14f * u, h * 0.52f)
+            text.typeface = thin
+            text.textSize = clockSize
+            text.color = Pal.TEXT
+            val base = b.top + 4.8f * u + clockSize * 0.84f
+            val t = clock.format(now)
+            c.drawText(t, b.left - 0.4f * u, base, text)
+            val tw = text.measureText(t)
+            text.typeface = medium
+            text.textSize = 3.6f * u
+            text.color = Pal.SILVER
+            c.drawText(ampm.format(now), b.left + tw + 1.4f * u, base, text)
+            if (h > 26f * u) {
+                text.typeface = regular
+                text.textSize = 3.8f * u
+                text.color = Pal.TEXT2
+                c.drawText(dateFmt.format(now), b.left, base + 6.0f * u, text)
+            }
+        }
+    }
+
+    private fun drawMedia(c: Canvas, b: RectF, m: MediaInfo) {
+        val artSize = b.height()
+        val art = RectF(b.left, b.top, b.left + artSize, b.top + artSize)
+        val radius = 1.8f * u
         if (m.art != null) {
             c.save()
-            clipPath.reset()
-            clipPath.addRoundRect(art, radius, radius, Path.Direction.CW)
-            c.clipPath(clipPath)
+            path.reset()
+            path.addRoundRect(art, radius, radius, Path.Direction.CW)
+            c.clipPath(path)
             drawCover(c, m.art, art)
             c.restore()
         } else {
-            fill.color = withAlpha(Pal.CYAN, 34)
+            fill.shader = LinearGradient(art.left, art.top, art.right, art.bottom, Pal.RED_DEEP, Color.parseColor("#2A0A0E"), Shader.TileMode.CLAMP)
             c.drawRoundRect(art, radius, radius, fill)
-            text.typeface = medium
+            fill.shader = null
+            text.typeface = light
             text.textAlign = Paint.Align.CENTER
-            text.textSize = artSize * 0.42f
-            text.color = Pal.CYAN
+            text.textSize = artSize * 0.46f
+            text.color = Pal.TEXT
             c.drawText(m.appName.take(1).uppercase(), art.centerX(), art.centerY() + text.textSize * 0.36f, text)
             text.textAlign = Paint.Align.LEFT
         }
 
-        // play state glyph on the right
-        val gx = b.right - 5.5f * u
-        val gy = b.centerY() - 1.6f * u
-        fill.color = if (m.playing) Pal.CYAN else Pal.MUTED
-        if (m.playing) {
-            r2.set(gx - 1.6f * u, gy - 2.4f * u, gx - 0.5f * u, gy + 2.4f * u); c.drawRoundRect(r2, 0.4f * u, 0.4f * u, fill)
-            r2.set(gx + 0.5f * u, gy - 2.4f * u, gx + 1.6f * u, gy + 2.4f * u); c.drawRoundRect(r2, 0.4f * u, 0.4f * u, fill)
-        } else {
-            clipPath.reset()
-            clipPath.moveTo(gx - 1.6f * u, gy - 2.6f * u)
-            clipPath.lineTo(gx + 2.2f * u, gy)
-            clipPath.lineTo(gx - 1.6f * u, gy + 2.6f * u)
-            clipPath.close()
-            c.drawPath(clipPath, fill)
+        val tx = art.right + 3.2f * u
+        val tw = b.right - tx - 6f * u
+        caps(c, m.appName.uppercase(), tx, b.top + 2.6f * u, tw, Pal.SILVER)
+        text.typeface = medium
+        text.textSize = 4.4f * u
+        text.color = Pal.TEXT
+        c.drawText(fit(m.title.ifEmpty { m.appName }, tw), tx, b.top + 8.4f * u, text)
+        if (b.height() > 15f * u && m.artist.isNotBlank()) {
+            text.typeface = regular
+            text.textSize = 3.6f * u
+            text.color = Pal.TEXT2
+            c.drawText(fit(m.artist, tw), tx, b.top + 13.2f * u, text)
         }
 
-        val tx = art.right + 3f * u
-        val tw = gx - 4f * u - tx
-        val compact = b.height() < 20f * u
-        text.typeface = medium
-        text.textSize = if (compact) 4.2f * u else 4.8f * u
-        text.color = Pal.TEXT
-        c.drawText(fit(m.title.ifEmpty { m.appName }, tw), tx, art.top + text.textSize * 0.95f, text)
-        val titleBottom = art.top + text.textSize * 0.95f
-        text.typeface = regular
-        text.textSize = if (compact) 3.4f * u else 3.8f * u
-        text.color = Pal.MUTED
-        val sub = listOf(m.artist, m.appName).filter { it.isNotBlank() }.distinct().joinToString(" · ")
-        c.drawText(fit(sub, tw), tx, titleBottom + text.textSize * 1.35f, text)
+        // play state glyph
+        val gx = b.right - 2.2f * u
+        val gy = b.top + 7f * u
+        fill.color = if (m.playing) Pal.TEXT else Pal.SILVER
+        if (m.playing) {
+            r2.set(gx - 1.5f * u, gy - 2.1f * u, gx - 0.55f * u, gy + 2.1f * u); c.drawRoundRect(r2, 0.3f * u, 0.3f * u, fill)
+            r2.set(gx + 0.55f * u, gy - 2.1f * u, gx + 1.5f * u, gy + 2.1f * u); c.drawRoundRect(r2, 0.3f * u, 0.3f * u, fill)
+        } else {
+            path.reset()
+            path.moveTo(gx - 1.4f * u, gy - 2.3f * u); path.lineTo(gx + 2.0f * u, gy); path.lineTo(gx - 1.4f * u, gy + 2.3f * u); path.close()
+            c.drawPath(path, fill)
+        }
 
-        // progress
         if (m.durationMs > 0) {
             val pos = m.livePosition()
-            val by = art.bottom - 1.2f * u
-            val timeTxt = if (m.longForm) "-" + fmtTime(m.durationMs - pos) else fmtTime(pos) + " / " + fmtTime(m.durationMs)
+            val by = b.bottom - 0.6f * u
+            val timeTxt = if (m.longForm) "−" + fmtTime(m.durationMs - pos) else fmtTime(pos)
             text.typeface = medium
-            text.textSize = 2.9f * u
-            text.color = Pal.MUTED
+            text.textSize = 2.8f * u
+            text.color = Pal.SILVER
             val timeW = text.measureText(timeTxt)
-            c.drawText(timeTxt, tx + tw - timeW, by + 1.1f * u, text)
-            val barRight = tx + tw - timeW - 2.4f * u
+            val barRight = b.right - timeW - 2.4f * u
+            c.drawText(timeTxt, b.right - timeW, by + 1.0f * u, text)
             stroke.shader = null
-            stroke.strokeWidth = 0.9f * u
-            stroke.color = Pal.DIM
+            stroke.strokeWidth = 0.55f * u
+            stroke.color = Pal.TRACK
             c.drawLine(tx, by, barRight, by, stroke)
             val frac = (pos.toFloat() / m.durationMs).coerceIn(0f, 1f)
-            stroke.color = Pal.CYAN
-            if (frac > 0f) c.drawLine(tx, by, tx + (barRight - tx) * frac, by, stroke)
+            if (frac > 0f) {
+                stroke.color = Pal.RED
+                c.drawLine(tx, by, tx + (barRight - tx) * frac, by, stroke)
+            }
         }
     }
 
+    private class Stat(val label: String, val value: String, val sub: String, val color: Int)
+
+    private fun drawStats(c: Canvas, b: RectF, s: VehicleState) {
+        val o = s.obd
+        val now = System.currentTimeMillis()
+
+        // tires: show the lowest one
+        val paired = Wheel.entries.filter { Prefs.tireId(it) != null }
+        val fresh = paired.mapNotNull { w -> s.tires[w]?.takeIf { now - it.seenAt < 10 * 60_000 }?.let { w to it } }
+        val tire = when {
+            paired.isEmpty() -> Stat("TIRES", "—", "NOT PAIRED", Pal.SILVER)
+            fresh.isEmpty() -> Stat("TIRES", "—", "WAITING", Pal.SILVER)
+            else -> {
+                val (w, low) = fresh.minBy { it.second.psi }
+                val col = tireColor(low)
+                Stat("TIRES", low.psi.roundToInt().toString(),
+                    if (col == Pal.TEXT) (if (fresh.size == paired.size) "ALL ${paired.size} OK" else "${fresh.size} OF ${paired.size}") else "${w.short} LOW",
+                    col)
+            }
+        }
+        val live = o.connected
+        val coolant = o.coolantF
+        val volts = o.voltage
+        val rpm = o.rpm ?: 0
+        val fuel = o.fuelPct
+        val stats = listOf(
+            tire,
+            Stat("COOLANT", if (live && coolant != null) "${coolant.roundToInt()}°" else "—",
+                when { !live -> "OBD OFF"; coolant == null -> ""; coolant < 160 -> "WARMING"; coolant >= 230 -> "HOT"; else -> "NORMAL" },
+                if (live && coolant != null && coolant >= 230) Pal.ALARM else Pal.TEXT),
+            Stat("BATTERY", if (live && volts != null) "%.1f".format(volts) else "—",
+                when { !live || volts == null -> if (!live) "OBD OFF" else ""; rpm > 600 && volts < 13f -> "LOW CHARGE"; rpm > 600 -> "CHARGING"; volts < 11.9f -> "LOW"; else -> "RESTING" },
+                if (live && volts != null && ((rpm > 600 && volts < 13f) || volts < 11.9f)) Pal.AMBER else Pal.TEXT),
+            Stat("FUEL", if (live && fuel != null) "$fuel%" else "—",
+                if (live && fuel != null) "≈ %.1f GAL".format(Prefs.tankGal * fuel / 100f) else if (!live) "OBD OFF" else "",
+                if (live && fuel != null && fuel < 15) Pal.AMBER else Pal.TEXT),
+        )
+        val cw = b.width() / stats.size
+        stats.forEachIndexed { i, st ->
+            val x = b.left + cw * i + (if (i == 0) 0f else 2.6f * u)
+            if (i > 0) {
+                stroke.strokeWidth = 0.22f * u
+                stroke.color = Pal.HAIRLINE
+                c.drawLine(b.left + cw * i, b.top + 1f * u, b.left + cw * i, b.bottom - 0.5f * u, stroke)
+            }
+            val w = cw - 3.6f * u
+            caps(c, st.label, x, b.top + 3.2f * u, w, Pal.SILVER)
+            text.typeface = light
+            text.textSize = min(7.4f * u, w * 0.36f)
+            text.color = st.color
+            c.drawText(fit(st.value, w), x - 0.3f * u, b.top + 11.2f * u, text)
+            if (st.sub.isNotEmpty()) caps(c, st.sub, x, b.bottom - 0.4f * u, w, if (st.color == Pal.TEXT) withAlpha(Pal.SILVER, 200) else st.color, 2.5f)
+        }
+    }
+
+    private fun drawAlert(c: Canvas, b: RectF, title: String, message: String, sev: Severity) {
+        val col = when (sev) { Severity.CRITICAL -> Pal.ALARM; Severity.WARN -> Pal.AMBER; else -> Pal.TEXT2 }
+        val pulse = if (sev == Severity.CRITICAL) (0.75f + 0.25f * sin(System.currentTimeMillis() / 180.0).toFloat()) else 1f
+        fill.color = withAlpha(col, (40 * pulse).toInt())
+        c.drawRoundRect(b, 2f * u, 2f * u, fill)
+        fill.color = col
+        r2.set(b.left, b.top, b.left + 1.0f * u, b.bottom)
+        c.drawRoundRect(r2, 0.5f * u, 0.5f * u, fill)
+        text.typeface = medium
+        text.textSize = 3.8f * u
+        text.color = col
+        val x = b.left + 3.4f * u
+        val by = b.centerY() + 1.3f * u
+        val head = fit(title, b.width() * 0.48f)
+        c.drawText(head, x, by, text)
+        val hw = text.measureText(head)
+        text.typeface = regular
+        text.color = Pal.TEXT
+        c.drawText(fit(message, b.right - x - hw - 5f * u), x + hw + 2.6f * u, by, text)
+    }
+
+    // ───────────────────────── GAUGES ─────────────────────────
+
+    private class Gauge(
+        val label: String, val value: Float?, val min: Float, val max: Float,
+        val unit: String, val sub: String?, val format: (Float) -> String, val warn: (Float) -> Int?,
+    )
+
+    private fun drawGauges(c: Canvas, a: RectF, s: VehicleState) {
+        val o = s.obd
+        val gauges = listOf(
+            // 2.5L Skyactiv-G: redline ≈ 6,500 rpm
+            Gauge("ENGINE SPEED", o.rpm?.toFloat(), 0f, 7000f, "RPM", null, { "%,d".format(it.roundToInt()) }) { if (it > 6200) Pal.ALARM else null },
+            Gauge("COOLANT", o.coolantF, 100f, 260f, "°F", null, { it.roundToInt().toString() }) { if (it >= 230) Pal.ALARM else if (it >= 222) Pal.AMBER else null },
+            Gauge("BATTERY", o.voltage, 10f, 16f, "VOLTS", null, { "%.1f".format(it) }) { if (it < 12f || it > 15f) Pal.AMBER else null },
+            Gauge("ENGINE LOAD", o.load?.toFloat(), 0f, 100f, "%", null, { it.roundToInt().toString() }) { null },
+            Gauge("INTAKE AIR", o.intakeF, 0f, 160f, "°F", null, { it.roundToInt().toString() }) { if (it > 130) Pal.AMBER else null },
+            Gauge("FUEL", o.fuelPct?.toFloat(), 0f, 100f, "%",
+                o.fuelPct?.let { "≈ %.1f GAL".format(Prefs.tankGal * it / 100f) }, { it.roundToInt().toString() }) { if (it < 15) Pal.AMBER else null },
+        )
+        val p = 4.5f * u
+        val box = RectF(a.left + p, a.top + 1f * u, a.right - p, a.bottom - p)
+        panel(c, box)
+        val cols = 3
+        val rows = 2
+        val cw = box.width() / cols
+        val ch = box.height() / rows
+        stroke.strokeWidth = 0.22f * u
+        stroke.color = Pal.HAIRLINE
+        for (i in 1 until cols) c.drawLine(box.left + cw * i, box.top + 3f * u, box.left + cw * i, box.bottom - 3f * u, stroke)
+        c.drawLine(box.left + 3f * u, box.top + ch, box.right - 3f * u, box.top + ch, stroke)
+        gauges.forEachIndexed { i, g ->
+            val x = box.left + (i % cols) * cw
+            val y = box.top + (i / cols) * ch
+            drawGauge(c, RectF(x, y, x + cw, y + ch), g, o.connected, o.status)
+        }
+    }
+
+    private fun drawGauge(c: Canvas, b: RectF, g: Gauge, live: Boolean, status: String) {
+        caps(c, g.label, b.left + 3.6f * u, b.top + 5.4f * u, b.width() - 7f * u, Pal.SILVER)
+        val cx = b.centerX()
+        val rad = min(b.width() * 0.30f, b.height() * 0.33f)
+        val cy = b.top + b.height() * 0.58f
+        r.set(cx - rad, cy - rad, cx + rad, cy + rad)
+        stroke.shader = null
+        stroke.strokeWidth = 0.8f * u
+        stroke.color = Pal.TRACK
+        c.drawArc(r, 135f, 270f, false, stroke)
+        val v = g.value
+        val warn = if (v != null) g.warn(v) else null
+        if (live && v != null) {
+            val frac = ((v - g.min) / (g.max - g.min)).coerceIn(0f, 1f)
+            val col = warn ?: Pal.RED
+            stroke.color = withAlpha(col, 55)
+            stroke.strokeWidth = 3.2f * u
+            if (frac > 0.005f) c.drawArc(r, 135f, 270f * frac, false, stroke)
+            stroke.shader = LinearGradient(r.left, r.bottom, r.right, r.top, warn ?: Pal.RED_DEEP, col, Shader.TileMode.CLAMP)
+            stroke.strokeWidth = 1.3f * u
+            if (frac > 0.005f) c.drawArc(r, 135f, 270f * frac, false, stroke)
+            stroke.shader = null
+        }
+        text.textAlign = Paint.Align.CENTER
+        text.typeface = thin
+        text.textSize = rad * 0.62f
+        text.color = if (live && v != null) (warn ?: Pal.TEXT) else Pal.DIM
+        c.drawText(if (live && v != null) g.format(v) else "—", cx, cy + text.textSize * 0.32f, text)
+        val unitTxt = if (live) g.unit else status.uppercase()
+        text.typeface = medium
+        text.textSize = 2.7f * u
+        text.letterSpacing = 0.2f
+        text.color = Pal.SILVER
+        c.drawText(fit(unitTxt, b.width() - 6f * u), cx, cy + rad * 0.62f, text)
+        if (live && g.sub != null) {
+            text.color = Pal.TEXT2
+            c.drawText(g.sub, cx, cy + rad * 0.62f + 4.2f * u, text)
+        }
+        text.letterSpacing = 0f
+        text.textAlign = Paint.Align.LEFT
+    }
+
+    // ───────────────────────── TIRES ─────────────────────────
+
+    private fun drawTires(c: Canvas, a: RectF, s: VehicleState) {
+        val p = 4.5f * u
+        val box = RectF(a.left + p, a.top + 1f * u, a.right - p, a.bottom - p)
+        panel(c, box)
+        val cx = box.centerX()
+        val cy = box.centerY() - 1.5f * u
+
+        // CX-5 silhouette, top-down, nose up
+        val bodyH = box.height() - 16f * u
+        val bodyW = bodyH * 0.45f
+        val L = cx - bodyW / 2
+        val R = cx + bodyW / 2
+        val T = cy - bodyH / 2
+        val B = cy + bodyH / 2
+        path.reset()
+        path.moveTo(cx, T)
+        path.cubicTo(R - bodyW * 0.08f, T, R, T + bodyH * 0.04f, R, T + bodyH * 0.14f)
+        path.lineTo(R, B - bodyH * 0.10f)
+        path.cubicTo(R, B - bodyH * 0.02f, R - bodyW * 0.10f, B, cx, B)
+        path.cubicTo(L + bodyW * 0.10f, B, L, B - bodyH * 0.02f, L, B - bodyH * 0.10f)
+        path.lineTo(L, T + bodyH * 0.14f)
+        path.cubicTo(L, T + bodyH * 0.04f, L + bodyW * 0.08f, T, cx, T)
+        path.close()
+        fill.shader = LinearGradient(L, 0f, R, 0f,
+            intArrayOf(Color.parseColor("#141619"), Color.parseColor("#22252A"), Color.parseColor("#141619")), null, Shader.TileMode.CLAMP)
+        c.drawPath(path, fill)
+        fill.shader = null
+        stroke.strokeWidth = 0.3f * u
+        stroke.color = Color.parseColor("#3A3D43")
+        c.drawPath(path, stroke)
+        // hood creases (Kodo lines)
+        stroke.color = Color.parseColor("#2C2F34")
+        c.drawLine(cx - bodyW * 0.22f, T + bodyH * 0.05f, cx - bodyW * 0.26f, T + bodyH * 0.22f, stroke)
+        c.drawLine(cx + bodyW * 0.22f, T + bodyH * 0.05f, cx + bodyW * 0.26f, T + bodyH * 0.22f, stroke)
+        // glass
+        fill.color = Color.parseColor("#0A0B0D")
+        path.reset()
+        path.moveTo(L + bodyW * 0.14f, T + bodyH * 0.30f)
+        path.lineTo(R - bodyW * 0.14f, T + bodyH * 0.30f)
+        path.lineTo(R - bodyW * 0.20f, T + bodyH * 0.24f)
+        path.lineTo(L + bodyW * 0.20f, T + bodyH * 0.24f)
+        path.close()
+        c.drawPath(path, fill)
+        r2.set(L + bodyW * 0.16f, T + bodyH * 0.34f, R - bodyW * 0.16f, B - bodyH * 0.24f)
+        fill.color = Color.parseColor("#101215")
+        c.drawRoundRect(r2, 2f * u, 2f * u, fill)
+        r2.set(L + bodyW * 0.18f, B - bodyH * 0.18f, R - bodyW * 0.18f, B - bodyH * 0.10f)
+        fill.color = Color.parseColor("#0A0B0D")
+        c.drawRoundRect(r2, 1.4f * u, 1.4f * u, fill)
+        // mirrors
+        fill.color = Color.parseColor("#1C1E22")
+        r2.set(L - 2.2f * u, T + bodyH * 0.27f, L + 0.4f * u, T + bodyH * 0.31f); c.drawRoundRect(r2, 1f * u, 1f * u, fill)
+        r2.set(R - 0.4f * u, T + bodyH * 0.27f, R + 2.2f * u, T + bodyH * 0.31f); c.drawRoundRect(r2, 1f * u, 1f * u, fill)
+
+        val now = System.currentTimeMillis()
+        for (w in Wheel.entries) {
+            val left = w == Wheel.FL || w == Wheel.RL
+            val front = w == Wheel.FL || w == Wheel.FR
+            val wx = if (left) L - 0.6f * u else R + 0.6f * u
+            val wy = if (front) T + bodyH * 0.19f else B - bodyH * 0.19f
+            val t = s.tires[w]
+            val paired = Prefs.tireId(w) != null
+            val stale = t == null || now - t.seenAt > 10 * 60_000
+            val col = when {
+                !paired -> Pal.DIM
+                stale -> Pal.SILVER
+                else -> t?.let { tireColor(it) } ?: Pal.SILVER
+            }
+            // tire
+            r2.set(wx - 1.8f * u, wy - 6.2f * u, wx + 1.8f * u, wy + 6.2f * u)
+            if (paired && !stale && col != Pal.TEXT) {
+                fill.color = withAlpha(col, 70)
+                r.set(r2.left - 1.2f * u, r2.top - 1.2f * u, r2.right + 1.2f * u, r2.bottom + 1.2f * u)
+                c.drawRoundRect(r, 2.4f * u, 2.4f * u, fill)
+            }
+            fill.color = if (col == Pal.TEXT) Color.parseColor("#5A5D63") else col
+            c.drawRoundRect(r2, 1.6f * u, 1.6f * u, fill)
+
+            // leader line + reading
+            val gapX = 7f * u
+            val lineEnd = if (left) wx - gapX else wx + gapX
+            stroke.strokeWidth = 0.22f * u
+            stroke.color = Pal.HAIRLINE
+            c.drawLine(if (left) wx - 2.6f * u else wx + 2.6f * u, wy, lineEnd, wy, stroke)
+
+            val align = if (left) Paint.Align.RIGHT else Paint.Align.LEFT
+            val tx = if (left) lineEnd - 1.6f * u else lineEnd + 1.6f * u
+            val maxW = if (left) tx - box.left - 4f * u else box.right - 4f * u - tx
+            text.textAlign = align
+            caps(c, w.label.uppercase(), tx, wy - 8.6f * u, maxW, Pal.SILVER)
+            val psi = when {
+                !paired -> "—"
+                stale -> "––"
+                else -> t?.psi?.roundToInt()?.toString() ?: "––"
+            }
+            text.textAlign = align
+            text.typeface = thin
+            text.textSize = 13f * u
+            text.color = when { !paired -> Pal.DIM; stale -> Pal.SILVER; else -> col }
+            val psiW = text.measureText(psi)
+            c.drawText(psi, tx, wy + 3.6f * u, text)
+            text.typeface = medium
+            text.textSize = 2.8f * u
+            text.letterSpacing = 0.2f
+            text.color = Pal.SILVER
+            text.textAlign = Paint.Align.LEFT
+            val unitX = if (left) tx - psiW - text.measureText("PSI") - 1.2f * u else tx + psiW + 1.2f * u
+            if (paired) c.drawText("PSI", unitX, wy + 3.6f * u, text)
+            text.letterSpacing = 0f
+            val detail = when {
+                !paired -> "PAIR ON PHONE"
+                t == null -> "WAITING"
+                else -> buildList {
+                    t.tempF?.let { add("${it.roundToInt()}°F") }
+                    t.battery?.let { add("BATT $it%") }
+                    val age = (now - t.seenAt) / 60_000
+                    if (age >= 2) add("${age}M AGO")
+                }.joinToString("  ·  ")
+            }
+            text.textAlign = align
+            caps(c, detail, tx, wy + 9.4f * u, maxW, Pal.TEXT2, 2.6f)
+            text.textAlign = Paint.Align.LEFT
+        }
+
+        text.textAlign = Paint.Align.CENTER
+        caps(c, "${Prefs.carName.uppercase()}  ·  TARGET ${Prefs.targetPsi} PSI  ·  WARN BELOW ${Prefs.tireLowPsi}",
+            cx, box.bottom - 3f * u, box.width() - 8f * u, Pal.SILVER, 2.6f)
+        text.textAlign = Paint.Align.LEFT
+    }
+
+    private fun tireColor(t: TireReading): Int = when {
+        t.psi < Prefs.tireLowPsi - 4 -> Pal.ALARM
+        t.psi < Prefs.tireLowPsi || t.psi > Prefs.tireHighPsi -> Pal.AMBER
+        else -> Pal.TEXT
+    }
+
+    // ───────────────────────── helpers ─────────────────────────
+
+    private fun panel(c: Canvas, b: RectF) {
+        val rad = 3.4f * u
+        fill.shader = LinearGradient(0f, b.top, 0f, b.bottom, Pal.PANEL_TOP, Pal.PANEL_BOTTOM, Shader.TileMode.CLAMP)
+        c.drawRoundRect(b, rad, rad, fill)
+        fill.shader = null
+        stroke.shader = null
+        stroke.strokeWidth = 0.22f * u
+        stroke.color = Pal.HAIRLINE
+        c.drawRoundRect(b, rad, rad, stroke)
+        // top highlight, like light catching a bezel
+        stroke.color = withAlpha(Color.WHITE, 18)
+        c.drawLine(b.left + rad, b.top + 0.3f * u, b.right - rad, b.top + 0.3f * u, stroke)
+    }
+
+    private fun hairline(c: Canvas, x1: Float, y: Float, x2: Float) {
+        stroke.shader = null
+        stroke.strokeWidth = 0.22f * u
+        stroke.color = Pal.HAIRLINE
+        c.drawLine(x1, y, x2, y, stroke)
+    }
+
+    /** Small-caps label with wide tracking, the Mazda Connect way. Respects the current text alignment. */
+    private fun caps(c: Canvas, s: String, x: Float, y: Float, maxW: Float, color: Int, sizeU: Float = 2.8f) {
+        text.typeface = medium
+        text.textSize = sizeU * u
+        text.letterSpacing = 0.2f
+        text.color = color
+        c.drawText(fit(s, maxW), x, y, text)
+        text.letterSpacing = 0f
+    }
+
+    private fun drawTinted(c: Canvas, b: Bitmap, box: RectF, inset: Float) {
+        val i = box.width() * inset
+        r2.set(box.left + i, box.top + i, box.right - i, box.bottom - i)
+        val ar = b.width.toFloat() / max(1, b.height)
+        if (ar > 1) { val h = r2.width() / ar; val d = (r2.height() - h) / 2; r2.top += d; r2.bottom -= d }
+        else { val w = r2.height() * ar; val d = (r2.width() - w) / 2; r2.left += d; r2.right -= d }
+        bmpPaint.colorFilter = PorterDuffColorFilter(Pal.TEXT, PorterDuff.Mode.SRC_IN)
+        c.drawBitmap(b, null, r2, bmpPaint)
+        bmpPaint.colorFilter = null
+    }
+
     private fun drawCover(c: Canvas, b: Bitmap, box: RectF) {
-        // center-crop into the square
         val bw = b.width.toFloat(); val bh = b.height.toFloat()
         val scale = max(box.width() / bw, box.height() / bh)
         val w = bw * scale; val h = bh * scale
@@ -199,473 +814,8 @@ class DashRenderer {
         return if (h > 0) "%d:%02d:%02d".format(h, m, sec) else "%d:%02d".format(m, sec)
     }
 
-    private fun drawSpeedRing(c: Canvas, box: RectF, s: VehicleState) {
-        val cx = box.centerX()
-        val cy = box.centerY() + box.height() * 0.02f
-        val rad = box.width() / 2 - 4 * u
-        val limit = s.speedLimitMph
-        val speed = shownSpeed
-        val maxSpeed = if (speed > 95) 140f else 100f
-        val over = limit != null && speed > limit + 2
-        val wayOver = limit != null && speed > limit + 9
-
-        // soft halo
-        fill.shader = null
-        fill.color = withAlpha(if (wayOver) Pal.RED else if (over) Pal.AMBER else Pal.CYAN, 18)
-        c.drawCircle(cx, cy, rad * 0.86f, fill)
-
-        r.set(cx - rad, cy - rad, cx + rad, cy + rad)
-        stroke.shader = null
-        stroke.strokeWidth = 3.4f * u
-        stroke.color = Pal.DIM
-        c.drawArc(r, 150f, 240f, false, stroke)
-
-        // ticks
-        stroke.strokeWidth = 0.5f * u
-        for (i in 0..(maxSpeed / 10).toInt()) {
-            val ang = Math.toRadians(150.0 + 240.0 * (i * 10) / maxSpeed)
-            val r1 = rad - 4.2f * u
-            val r2l = rad - (if (i % 2 == 0) 6.4f else 5.2f) * u
-            stroke.color = if (i % 2 == 0) Pal.MUTED else withAlpha(Pal.MUTED, 110)
-            c.drawLine(cx + (r1 * cos(ang)).toFloat(), cy + (r1 * sin(ang)).toFloat(),
-                cx + (r2l * cos(ang)).toFloat(), cy + (r2l * sin(ang)).toFloat(), stroke)
-        }
-
-        // limit marker on the ring
-        if (limit != null && limit <= maxSpeed) {
-            val ang = Math.toRadians(150.0 + 240.0 * limit / maxSpeed)
-            fill.color = Pal.TEXT
-            c.drawCircle(cx + (rad * cos(ang)).toFloat(), cy + (rad * sin(ang)).toFloat(), 1.5f * u, fill)
-        }
-
-        // progress
-        val sweep = (240f * (speed / maxSpeed)).coerceIn(0f, 240f)
-        if (sweep > 0.5f) {
-            val end = if (wayOver) Pal.RED else if (over) Pal.AMBER else Pal.CYAN
-            val start = if (over) Pal.AMBER else Pal.TEAL
-            stroke.shader = LinearGradient(r.left, r.bottom, r.right, r.top, start, end, Shader.TileMode.CLAMP)
-            stroke.strokeWidth = 3.4f * u
-            c.drawArc(r, 150f, sweep, false, stroke)
-            stroke.shader = null
-        }
-
-        // number
-        val shown = if (s.bestSpeed == null) "--" else speed.roundToInt().toString()
-        text.typeface = light
-        text.textAlign = Paint.Align.CENTER
-        text.textSize = rad * 0.62f
-        text.color = if (wayOver) Pal.RED else Pal.TEXT
-        c.drawText(shown, cx, cy + text.textSize * 0.30f, text)
-        text.typeface = medium
-        text.textSize = 4.2f * u
-        text.letterSpacing = 0.25f
-        text.color = Pal.MUTED
-        c.drawText("MPH", cx, cy + rad * 0.40f, text)
-        text.letterSpacing = 0f
-
-        // speed limit sign between the ring's ends
-        if (limit != null) {
-            val w = 13f * u
-            val h = 15.5f * u
-            r2.set(cx - w / 2, cy + rad * 0.62f, cx + w / 2, cy + rad * 0.62f + h)
-            if (r2.bottom > box.bottom + 2 * u) r2.offset(0f, box.bottom + 2 * u - r2.bottom)
-            if (over) {
-                fill.color = withAlpha(if (wayOver) Pal.RED else Pal.AMBER, 90)
-                r.set(r2.left - 1.2f * u, r2.top - 1.2f * u, r2.right + 1.2f * u, r2.bottom + 1.2f * u)
-                c.drawRoundRect(r, 2.6f * u, 2.6f * u, fill)
-            }
-            fill.color = Color.WHITE
-            c.drawRoundRect(r2, 1.8f * u, 1.8f * u, fill)
-            stroke.strokeWidth = 0.55f * u
-            stroke.color = Color.BLACK
-            r.set(r2.left + 0.9f * u, r2.top + 0.9f * u, r2.right - 0.9f * u, r2.bottom - 0.9f * u)
-            c.drawRoundRect(r, 1.2f * u, 1.2f * u, stroke)
-            text.color = Color.BLACK
-            text.typeface = condensed
-            text.textSize = 2.5f * u
-            c.drawText("SPEED", r2.centerX(), r2.top + 4.0f * u, text)
-            c.drawText("LIMIT", r2.centerX(), r2.top + 6.6f * u, text)
-            text.textSize = 7.2f * u
-            c.drawText(limit.toString(), r2.centerX(), r2.bottom - 2.0f * u, text)
-        } else if (!s.gpsOk) {
-            text.typeface = regular
-            text.textSize = 3.2f * u
-            text.color = Pal.MUTED
-            c.drawText("Waiting for GPS", cx, cy + rad * 0.72f, text)
-        }
-        text.textAlign = Paint.Align.LEFT
-    }
-
-    private fun drawNavCard(c: Canvas, b: RectF, s: VehicleState) {
-        card(c, b)
-        val p = 4f * u
-        val nav = s.nav?.takeIf { System.currentTimeMillis() - it.updatedAt < 5 * 60_000 }
-        val alert = s.activeAlerts.maxByOrNull { it.severity.ordinal }
-        val alertH = if (alert != null) 10f * u else 0f
-        val content = RectF(b.left + p, b.top + p, b.right - p, b.bottom - p - alertH)
-
-        val ch = content.height()
-        val compact = ch < 30f * u
-        if (nav != null) {
-            val iconSize = min(ch * (if (compact) 0.95f else 0.62f), 22f * u)
-            r.set(content.left, content.top, content.left + iconSize, content.top + iconSize)
-            fill.color = withAlpha(Pal.CYAN, 40)
-            c.drawRoundRect(r, 3f * u, 3f * u, fill)
-            nav.icon?.let { drawTinted(c, it, r, 0.16f) }
-            val tx = r.right + p
-            val tw = content.right - tx
-            val distSize = if (compact) min(10f * u, ch * 0.44f) else 11f * u
-            text.typeface = medium
-            text.color = Pal.TEXT
-            text.textSize = distSize
-            val dist = nav.distance.ifEmpty { "Next" }
-            c.drawText(fit(dist, tw - 18f * u), tx, content.top + distSize * 0.85f, text)
-            text.typeface = regular
-            text.textSize = if (compact) 4.4f * u else 5.2f * u
-            text.color = Color.parseColor("#C9D3DD")
-            val instrY = content.top + distSize + (if (compact) 4.8f else 6.5f) * u
-            wrap(c, nav.instruction, tx, instrY, tw, if (compact) 1 else 2, 6.6f * u)
-            if (nav.eta.isNotEmpty()) {
-                text.textSize = 3.6f * u
-                text.color = Pal.MUTED
-                if (compact) {
-                    if (ch > instrY - content.top + 5f * u) c.drawText(fit(nav.eta, tw), tx, content.bottom, text)
-                } else {
-                    c.drawText(fit(nav.eta, content.width()), content.left, content.bottom, text)
-                }
-            }
-        } else {
-            val now = Date()
-            val clockSize = if (compact) min(17f * u, ch * 0.62f) else 17f * u
-            val base = content.top + clockSize * 0.82f
-            text.typeface = light
-            text.textSize = clockSize
-            text.color = Pal.TEXT
-            val t = clock.format(now)
-            c.drawText(t, content.left, base, text)
-            val tw = text.measureText(t)
-            text.typeface = medium
-            text.textSize = 4.5f * u
-            text.color = Pal.MUTED
-            val ap = ampm.format(now)
-            c.drawText(ap, content.left + tw + 1.5f * u, base, text)
-            text.typeface = regular
-            text.textSize = 4.4f * u
-            text.color = Color.parseColor("#C9D3DD")
-            if (ch >= 24f * u) {
-                c.drawText(dateFmt.format(now), content.left, base + 7.5f * u, text)
-            }
-            if (!compact) {
-                text.textSize = 3.6f * u
-                text.color = Pal.MUTED
-                c.drawText(fit("Start a route in Google Maps to see turns here", content.width()), content.left, content.bottom, text)
-            }
-        }
-
-        // status chips, top-right
-        drawStatus(c, b.right - p, b.top + p + 1.6f * u, s)
-
-        if (alert != null) {
-            val col = when (alert.severity) { Severity.CRITICAL -> Pal.RED; Severity.WARN -> Pal.AMBER; else -> Pal.CYAN }
-            r.set(b.left + 1.6f * u, b.bottom - alertH - 0.4f * u, b.right - 1.6f * u, b.bottom - 1.6f * u)
-            fill.color = withAlpha(col, 46)
-            c.drawRoundRect(r, 2.2f * u, 2.2f * u, fill)
-            fill.color = col
-            c.drawCircle(r.left + 3.4f * u, r.centerY(), 1.3f * u, fill)
-            text.typeface = medium
-            text.textSize = 3.9f * u
-            text.color = col
-            val head = alert.title
-            c.drawText(fit(head, r.width() * 0.5f), r.left + 6.4f * u, r.centerY() + 1.4f * u, text)
-            val hw = min(text.measureText(head), r.width() * 0.5f)
-            text.typeface = regular
-            text.color = Pal.TEXT
-            c.drawText(fit(alert.message, r.width() - hw - 10f * u), r.left + 8.4f * u + hw, r.centerY() + 1.4f * u, text)
-        }
-    }
-
-    private fun drawStatus(c: Canvas, rightX: Float, y: Float, s: VehicleState) {
-        val items = listOf(
-            "GPS" to s.gpsOk,
-            "OBD" to s.obd.connected,
-            "TIRES" to s.tires.values.any { System.currentTimeMillis() - it.seenAt < 120_000 },
-            "HOME" to (s.haStatus == "Connected"),
-        )
-        text.typeface = medium
-        text.textSize = 2.5f * u
-        text.letterSpacing = 0.12f
-        var x = rightX
-        for ((label, ok) in items.reversed()) {
-            val w = text.measureText(label)
-            text.color = if (ok) Pal.MUTED else withAlpha(Pal.MUTED, 90)
-            c.drawText(label, x - w, y + 0.9f * u, text)
-            fill.color = if (ok) Pal.GREEN else Pal.DIM
-            c.drawCircle(x - w - 1.6f * u, y, 0.8f * u, fill)
-            x -= w + 5f * u
-        }
-        text.letterSpacing = 0f
-    }
-
-    private fun drawTireMini(c: Canvas, b: RectF, s: VehicleState) {
-        card(c, b)
-        label(c, "TIRES", b.left + 3.4f * u, b.top + 5.4f * u)
-        val bodyW = b.width() * 0.16f
-        val bodyH = b.height() * 0.62f
-        val cx = b.centerX()
-        val cy = b.centerY() + 2.4f * u
-        r.set(cx - bodyW / 2, cy - bodyH / 2, cx + bodyW / 2, cy + bodyH / 2)
-        stroke.strokeWidth = 0.5f * u
-        stroke.color = Pal.MUTED
-        c.drawRoundRect(r, bodyW * 0.4f, bodyW * 0.4f, stroke)
-        val gapX = bodyW / 2 + 3.2f * u
-        val spots = mapOf(
-            Wheel.FL to Pair(cx - gapX, cy - bodyH * 0.22f), Wheel.FR to Pair(cx + gapX, cy - bodyH * 0.22f),
-            Wheel.RL to Pair(cx - gapX, cy + bodyH * 0.34f), Wheel.RR to Pair(cx + gapX, cy + bodyH * 0.34f),
-        )
-        for ((w, pos) in spots) {
-            val t = s.tires[w]
-            val (txt, col) = tireText(w, t)
-            text.typeface = medium
-            text.textSize = min(6f * u, b.height() * 0.2f)
-            text.color = col
-            text.textAlign = if (w == Wheel.FL || w == Wheel.RL) Paint.Align.RIGHT else Paint.Align.LEFT
-            c.drawText(txt, pos.first, pos.second, text)
-            fill.color = col
-            val dotX = if (text.textAlign == Paint.Align.RIGHT) cx - bodyW / 2 - 0.6f * u else cx + bodyW / 2 + 0.6f * u
-            r2.set(dotX - 0.7f * u, pos.second - 4.6f * u, dotX + 0.7f * u, pos.second + 0.4f * u)
-            c.drawRoundRect(r2, 0.7f * u, 0.7f * u, fill)
-        }
-        text.textAlign = Paint.Align.LEFT
-    }
-
-    private fun tireText(w: Wheel, t: TireReading?): Pair<String, Int> {
-        if (Prefs.tireId(w) == null) return "—" to Pal.DIM
-        if (t == null || System.currentTimeMillis() - t.seenAt > 10 * 60_000) return "--" to Pal.MUTED
-        return t.psi.roundToInt().toString() to tireColor(t)
-    }
-
-    private fun tireColor(t: TireReading): Int = when {
-        t.psi < Prefs.tireLowPsi - 4 -> Pal.RED
-        t.psi < Prefs.tireLowPsi || t.psi > Prefs.tireHighPsi -> Pal.AMBER
-        else -> Pal.TEXT
-    }
-
-    private fun drawEngineMini(c: Canvas, b: RectF, s: VehicleState) {
-        card(c, b)
-        label(c, "ENGINE", b.left + 3.4f * u, b.top + 5.4f * u)
-        val o = s.obd
-        if (!o.connected) {
-            text.typeface = regular
-            text.textSize = 3.6f * u
-            text.color = Pal.MUTED
-            c.drawText(fit(o.status, b.width() - 6.8f * u), b.left + 3.4f * u, b.centerY() + 3f * u, text)
-            return
-        }
-        val rows = listOf(
-            Triple("Coolant", o.coolantF?.let { "${it.roundToInt()}°" } ?: "--",
-                if ((o.coolantF ?: 0f) >= 230f) Pal.RED else Pal.TEXT),
-            Triple("Battery", o.voltage?.let { "%.1f V".format(it) } ?: "--",
-                if (o.voltage != null && ((o.rpm ?: 0) > 600 && o.voltage < 13f)) Pal.AMBER else Pal.TEXT),
-            Triple("RPM", o.rpm?.let { "%,d".format(it) } ?: "--", Pal.TEXT),
-        )
-        if (b.height() < 34f * u) {
-            // short card: three columns side by side
-            val colW = (b.width() - 6.8f * u) / rows.size
-            rows.forEachIndexed { i, (lbl, v, col) ->
-                val x = b.left + 3.4f * u + colW * i
-                text.typeface = medium
-                text.textSize = min(5.2f * u, colW * 0.24f)
-                text.color = col
-                c.drawText(v, x, b.bottom - 7.2f * u, text)
-                text.typeface = regular
-                text.textSize = 3.0f * u
-                text.color = Pal.MUTED
-                c.drawText(lbl, x, b.bottom - 3.0f * u, text)
-            }
-            return
-        }
-        val top = b.top + 9.5f * u
-        val step = (b.bottom - 2.6f * u - top) / rows.size
-        rows.forEachIndexed { i, (lbl, v, col) ->
-            val y = top + step * (i + 0.72f)
-            text.typeface = regular
-            text.textSize = 3.6f * u
-            text.color = Pal.MUTED
-            c.drawText(lbl, b.left + 3.4f * u, y, text)
-            text.typeface = medium
-            text.textSize = 5.2f * u
-            text.color = col
-            text.textAlign = Paint.Align.RIGHT
-            c.drawText(v, b.right - 3.4f * u, y, text)
-            text.textAlign = Paint.Align.LEFT
-        }
-    }
-
-    // ───────────────────────── GAUGES ─────────────────────────
-
-    private class Gauge(
-        val label: String, val value: Float?, val min: Float, val max: Float,
-        val unit: String, val format: (Float) -> String, val warn: (Float) -> Int?,
-    )
-
-    private fun drawGauges(c: Canvas, a: RectF, s: VehicleState) {
-        val o = s.obd
-        val gauges = listOf(
-            Gauge("RPM", o.rpm?.toFloat(), 0f, 7000f, "rpm", { "%,d".format(it.roundToInt()) }) { if (it > 6200) Pal.RED else null },
-            Gauge("COOLANT", o.coolantF, 100f, 260f, "°F", { it.roundToInt().toString() }) { if (it >= 230) Pal.RED else if (it >= 220) Pal.AMBER else null },
-            Gauge("BATTERY", o.voltage, 10f, 16f, "volts", { "%.1f".format(it) }) { if (it < 12f || it > 15f) Pal.AMBER else null },
-            Gauge("ENGINE LOAD", o.load?.toFloat(), 0f, 100f, "%", { it.roundToInt().toString() }) { null },
-            Gauge("INTAKE AIR", o.intakeF, 0f, 160f, "°F", { it.roundToInt().toString() }) { if (it > 130) Pal.AMBER else null },
-            Gauge("FUEL", o.fuelPct?.toFloat(), 0f, 100f, "%", { it.roundToInt().toString() }) { if (it < 15) Pal.AMBER else null },
-        )
-        val p = 4 * u
-        val gap = 2.6f * u
-        val cols = 3
-        val rows = 2
-        val cw = (a.width() - 2 * p - gap * (cols - 1)) / cols
-        val ch = (a.height() - 2 * p - gap * (rows - 1)) / rows
-        gauges.forEachIndexed { i, g ->
-            val x = a.left + p + (i % cols) * (cw + gap)
-            val y = a.top + p + (i / cols) * (ch + gap)
-            drawGauge(c, RectF(x, y, x + cw, y + ch), g, o.connected, o.status)
-        }
-    }
-
-    private fun drawGauge(c: Canvas, b: RectF, g: Gauge, live: Boolean, status: String) {
-        card(c, b)
-        label(c, g.label, b.left + 3f * u, b.top + 5f * u)
-        val cx = b.centerX()
-        val rad = min(b.width() * 0.34f, b.height() * 0.38f)
-        val cy = b.top + b.height() * 0.58f
-        r.set(cx - rad, cy - rad, cx + rad, cy + rad)
-        stroke.shader = null
-        stroke.strokeWidth = 2.4f * u
-        stroke.color = Pal.DIM
-        c.drawArc(r, 140f, 260f, false, stroke)
-        val v = g.value
-        val col = if (v != null) g.warn(v) ?: Pal.CYAN else Pal.DIM
-        if (live && v != null) {
-            val frac = ((v - g.min) / (g.max - g.min)).coerceIn(0f, 1f)
-            stroke.color = col
-            c.drawArc(r, 140f, 260f * frac, false, stroke)
-        }
-        text.textAlign = Paint.Align.CENTER
-        text.typeface = light
-        text.textSize = rad * 0.62f
-        text.color = if (live && v != null) (g.warn(v) ?: Pal.TEXT) else Pal.MUTED
-        c.drawText(if (live && v != null) g.format(v) else "--", cx, cy + text.textSize * 0.32f, text)
-        text.typeface = medium
-        text.textSize = 3.2f * u
-        text.color = Pal.MUTED
-        c.drawText(if (live) g.unit else fit(status, b.width() - 4 * u), cx, cy + rad * 0.78f, text)
-        text.textAlign = Paint.Align.LEFT
-    }
-
-    // ───────────────────────── TIRES ─────────────────────────
-
-    private fun drawTires(c: Canvas, a: RectF, s: VehicleState) {
-        val p = 4 * u
-        val cx = a.centerX()
-        val cy = a.centerY()
-        // car body
-        val bodyH = a.height() - 2 * p - 6 * u
-        val bodyW = bodyH * 0.44f
-        r.set(cx - bodyW / 2, cy - bodyH / 2, cx + bodyW / 2, cy + bodyH / 2)
-        fill.color = Pal.CARD
-        c.drawRoundRect(r, bodyW * 0.42f, bodyW * 0.42f, fill)
-        stroke.strokeWidth = 0.5f * u
-        stroke.color = Pal.CARD_EDGE
-        c.drawRoundRect(r, bodyW * 0.42f, bodyW * 0.42f, stroke)
-        // windshield + rear glass
-        fill.color = Pal.DIM
-        r2.set(r.left + bodyW * 0.14f, r.top + bodyH * 0.22f, r.right - bodyW * 0.14f, r.top + bodyH * 0.36f)
-        c.drawRoundRect(r2, 2f * u, 2f * u, fill)
-        r2.set(r.left + bodyW * 0.16f, r.bottom - bodyH * 0.24f, r.right - bodyW * 0.16f, r.bottom - bodyH * 0.14f)
-        c.drawRoundRect(r2, 2f * u, 2f * u, fill)
-        // wheels
-        for (w in Wheel.entries) {
-            val left = w == Wheel.FL || w == Wheel.RL
-            val front = w == Wheel.FL || w == Wheel.FR
-            val wx = if (left) r.left - 1.2f * u else r.right + 1.2f * u
-            val wy = if (front) r.top + bodyH * 0.2f else r.bottom - bodyH * 0.2f
-            val t = s.tires[w]
-            val col = when {
-                Prefs.tireId(w) == null -> Pal.DIM
-                t == null || System.currentTimeMillis() - t.seenAt > 10 * 60_000 -> Pal.MUTED
-                else -> tireColor(t).let { if (it == Pal.TEXT) Pal.GREEN else it }
-            }
-            fill.color = col
-            r2.set(wx - 1.6f * u, wy - 6f * u, wx + 1.6f * u, wy + 6f * u)
-            c.drawRoundRect(r2, 1.4f * u, 1.4f * u, fill)
-
-            // reading card
-            val cw = min((a.width() - bodyW) / 2 - 3 * p, 46f * u)
-            val chh = bodyH * 0.40f
-            val bx = if (left) r.left - 5f * u - cw else r.right + 5f * u
-            val by = wy - chh / 2
-            val box = RectF(bx, by, bx + cw, by + chh)
-            card(c, box, if (col == Pal.RED || col == Pal.AMBER) col else null)
-            label(c, w.label.uppercase(), box.left + 3f * u, box.top + 5f * u)
-            val (psiTxt, psiCol) = tireText(w, t)
-            text.typeface = light
-            text.textSize = min(chh * 0.42f, 18f * u)
-            text.color = if (psiCol == Pal.DIM) Pal.MUTED else psiCol
-            val numY = box.top + 5f * u + text.textSize * 1.0f
-            c.drawText(psiTxt, box.left + 3f * u, numY, text)
-            val nw = text.measureText(psiTxt)
-            text.typeface = medium
-            text.textSize = 3.4f * u
-            text.color = Pal.MUTED
-            c.drawText("PSI", box.left + 4f * u + nw, numY, text)
-            text.typeface = regular
-            text.textSize = 3.5f * u
-            val detail = when {
-                Prefs.tireId(w) == null -> "Not paired — set up on phone"
-                t == null -> "Waiting for sensor"
-                else -> buildString {
-                    t.tempF?.let { append("${it.roundToInt()}°F") }
-                    t.battery?.let { if (isNotEmpty()) append("  ·  "); append("Batt $it%") }
-                    val age = (System.currentTimeMillis() - t.seenAt) / 1000
-                    if (age > 90) { if (isNotEmpty()) append("  ·  "); append("${age / 60}m ago") }
-                }
-            }
-            c.drawText(fit(detail, cw - 6f * u), box.left + 3f * u, box.bottom - 3.2f * u, text)
-        }
-    }
-
-    // ───────────────────────── helpers ─────────────────────────
-
-    private fun card(c: Canvas, b: RectF, edge: Int? = null) {
-        fill.shader = null
-        fill.color = Pal.CARD
-        c.drawRoundRect(b, 3.2f * u, 3.2f * u, fill)
-        stroke.shader = null
-        stroke.strokeWidth = if (edge != null) 0.7f * u else 0.35f * u
-        stroke.color = edge ?: Pal.CARD_EDGE
-        c.drawRoundRect(b, 3.2f * u, 3.2f * u, stroke)
-    }
-
-    private fun label(c: Canvas, s: String, x: Float, y: Float) {
-        text.typeface = medium
-        text.textSize = 2.7f * u
-        text.letterSpacing = 0.16f
-        text.color = Pal.MUTED
-        c.drawText(s, x, y, text)
-        text.letterSpacing = 0f
-    }
-
-    private fun drawTinted(c: Canvas, b: Bitmap, box: RectF, inset: Float) {
-        val i = box.width() * inset
-        r2.set(box.left + i, box.top + i, box.right - i, box.bottom - i)
-        // keep aspect
-        val ar = b.width.toFloat() / max(1, b.height)
-        if (ar > 1) { val h = r2.width() / ar; val d = (r2.height() - h) / 2; r2.top += d; r2.bottom -= d }
-        else { val w = r2.height() * ar; val d = (r2.width() - w) / 2; r2.left += d; r2.right -= d }
-        bmpPaint.colorFilter = PorterDuffColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN)
-        c.drawBitmap(b, null, r2, bmpPaint)
-    }
-
     private fun fit(s: String, maxW: Float): String {
+        if (maxW <= 0f) return ""
         if (text.measureText(s) <= maxW) return s
         var end = s.length
         while (end > 1 && text.measureText(s, 0, end) + text.measureText("…") > maxW) end--
@@ -673,7 +823,7 @@ class DashRenderer {
     }
 
     private fun wrap(c: Canvas, s: String, x: Float, y: Float, maxW: Float, maxLines: Int, lineH: Float) {
-        val words = s.split(' ')
+        val words = s.split(' ').filter { it.isNotEmpty() }
         var line = ""
         var n = 0
         var i = 0
@@ -683,7 +833,7 @@ class DashRenderer {
                 line = trial; i++
             } else {
                 val last = n == maxLines - 1
-                c.drawText(if (last) fit(words.drop(i).joinToString(" ").let { "$line $it" }, maxW) else line, x, y + n * lineH, text)
+                c.drawText(if (last) fit("$line ${words.drop(i).joinToString(" ")}", maxW) else line, x, y + n * lineH, text)
                 n++; line = ""
                 if (last) return
             }
@@ -691,5 +841,5 @@ class DashRenderer {
         if (line.isNotEmpty() && n < maxLines) c.drawText(fit(line, maxW), x, y + n * lineH, text)
     }
 
-    private fun withAlpha(color: Int, a: Int) = (color and 0x00FFFFFF) or (a shl 24)
+    private fun withAlpha(color: Int, a: Int) = (color and 0x00FFFFFF) or (a.coerceIn(0, 255) shl 24)
 }

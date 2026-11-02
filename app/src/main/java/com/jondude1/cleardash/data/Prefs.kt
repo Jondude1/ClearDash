@@ -41,11 +41,22 @@ object Prefs {
     fun wheelFor(id: String): Wheel? = Wheel.entries.firstOrNull { tireId(it) == id }
 
     var tireLowPsi: Int
-        get() = sp.getInt("tire_low", 28)
+        get() = sp.getInt("tire_low", 32)
         set(v) = edit { putInt("tire_low", v) }
     var tireHighPsi: Int
-        get() = sp.getInt("tire_high", 44)
+        get() = sp.getInt("tire_high", 42)
         set(v) = edit { putInt("tire_high", v) }
+
+    // Vehicle (defaults: 2018 Mazda CX-5 — 36 PSI door placard, 14.8 gal FWD tank)
+    var carName: String
+        get() = sp.getString("car_name", "Mazda CX-5") ?: "Mazda CX-5"
+        set(v) = edit { putString("car_name", v.trim().ifEmpty { "Mazda CX-5" }) }
+    var targetPsi: Int
+        get() = sp.getInt("target_psi", 36)
+        set(v) = edit { putInt("target_psi", v) }
+    var tankGal: Float
+        get() = sp.getFloat("tank_gal", 14.8f)
+        set(v) = edit { putFloat("tank_gal", v) }
 
     // Home Assistant
     var haUrl: String
