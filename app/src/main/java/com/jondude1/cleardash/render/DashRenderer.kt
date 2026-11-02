@@ -80,6 +80,18 @@ class DashRenderer {
     private var modeChangedAt = 0L
     private var u = 1f // one layout unit ≈ 1% of drawing height
 
+    /** Cut-out photo of a blue 2018 CX-5 (set by whoever owns a Context). */
+    var carPhoto: Bitmap? = null
+
+    /** When set, the startup sequence plays from this moment (ms, System.currentTimeMillis). */
+    var introStart = 0L
+
+    fun startIntro() {
+        introStart = System.currentTimeMillis()
+    }
+
+    val introRunning: Boolean get() = introStart > 0 && System.currentTimeMillis() - introStart < INTRO_MS
+
     fun draw(c: Canvas, area: RectF, fullW: Int, fullH: Int, s: VehicleState, mode: DashMode, knobHint: Boolean = false) {
         // background over the whole surface (also behind Android Auto's own chrome)
         fill.shader = LinearGradient(0f, 0f, 0f, fullH.toFloat(), Pal.BG_TOP, Pal.BG_BOTTOM, Shader.TileMode.CLAMP)
@@ -90,6 +102,13 @@ class DashRenderer {
         shownSpeed += (target - shownSpeed) * 0.22f
         if (area.width() < 10 || area.height() < 10) return
         u = min(area.height() / 100f, area.width() / 172f)
+
+        val ie = if (introStart > 0) System.currentTimeMillis() - introStart else Long.MAX_VALUE
+        if (ie < INTRO_HOLD_MS) {
+            drawIntro(c, fullW.toFloat(), fullH.toFloat(), ie)
+            return
+        }
+        shownSpeed = if (ie < INTRO_MS) target else shownSpeed
 
         val now = System.currentTimeMillis()
         if (mode != lastMode) {
@@ -110,6 +129,87 @@ class DashRenderer {
             DashMode.TIRES -> drawTires(c, body, s)
         }
         if (save >= 0) c.restoreToCount(save)
+
+        // the intro dissolves into the dashboard
+        if (ie < INTRO_MS) {
+            val a = 1f - (ie - INTRO_HOLD_MS) / (INTRO_MS - INTRO_HOLD_MS).toFloat()
+            val l = c.saveLayerAlpha(0f, 0f, fullW.toFloat(), fullH.toFloat(), (255 * a.coerceIn(0f, 1f)).toInt())
+            drawIntro(c, fullW.toFloat(), fullH.toFloat(), INTRO_HOLD_MS.toLong())
+            c.restoreToCount(l)
+        }
+    }
+
+    // ───────────────────────── STARTUP ─────────────────────────
+
+    private fun easeOut(x: Float): Float { val t = x.coerceIn(0f, 1f); return 1f - (1f - t) * (1f - t) * (1f - t) }
+    private fun phase(e: Long, start: Int, end: Int) = easeOut((e - start) / (end - start).toFloat())
+
+    /**
+     * Black stage → the blue CX-5 fades up under a soft spotlight → the name appears →
+     * a Soul Red line draws outward. Works at any size (car screen or phone).
+     */
+    fun drawIntro(c: Canvas, w: Float, h: Float, e: Long) {
+        c.drawColor(Color.BLACK)
+        val unit = min(h / 100f, w / 100f)
+        val carIn = phase(e, 0, 1100)
+        val nameIn = phase(e, 700, 1500)
+        val lineIn = phase(e, 1050, 1850)
+
+        val photo = carPhoto
+        val ar = if (photo != null) photo.width.toFloat() / photo.height else 1.95f
+        val carW = min(w * 0.64f, h * 0.50f * ar)
+        val carH = carW / ar
+        val cx = w / 2
+        val cy = h * 0.43f
+
+        // spotlight
+        fill.shader = RadialGradient(cx, cy, max(carW * 0.8f, 1f),
+            withAlpha(Color.parseColor("#2A3550"), (150 * carIn).toInt()), withAlpha(Color.BLACK, 0), Shader.TileMode.CLAMP)
+        c.drawCircle(cx, cy, carW * 0.8f, fill)
+        fill.shader = null
+
+        // ground shadow
+        val gy = cy + carH * 0.47f
+        c.save()
+        c.scale(1f, 0.16f, cx, gy)
+        fill.shader = RadialGradient(cx, gy, max(carW * 0.52f, 1f), withAlpha(Color.BLACK, (230 * carIn).toInt()), withAlpha(Color.BLACK, 0), Shader.TileMode.CLAMP)
+        c.drawCircle(cx, gy, carW * 0.52f, fill)
+        fill.shader = null
+        c.restore()
+
+        if (photo != null) {
+            val scale = 1.06f - 0.06f * carIn
+            val dw = carW * scale; val dh = carH * scale
+            r2.set(cx - dw / 2, cy - dh / 2 + (1f - carIn) * 2f * unit, cx + dw / 2, cy + dh / 2 + (1f - carIn) * 2f * unit)
+            bmpPaint.colorFilter = null
+            bmpPaint.alpha = (255 * carIn).toInt()
+            c.drawBitmap(photo, null, r2, bmpPaint)
+            bmpPaint.alpha = 255
+        }
+
+        // name
+        val name = Prefs.carName.uppercase()
+        text.textAlign = Paint.Align.CENTER
+        text.typeface = light
+        text.textSize = min(5.6f * unit, w * 0.05f)
+        text.letterSpacing = 0.55f
+        text.color = withAlpha(Pal.TEXT, (255 * nameIn).toInt())
+        val ty = cy + carH * 0.5f + text.textSize * 2.2f
+        // letterSpacing adds trailing space; nudge to optical center
+        c.drawText(name, cx + text.letterSpacing * text.textSize / 2, ty, text)
+        val nameW = text.measureText(name)
+        text.letterSpacing = 0f
+        text.textAlign = Paint.Align.LEFT
+
+        // Soul Red line
+        val lw = nameW * 1.1f * lineIn
+        if (lw > 1f) {
+            val ly = ty + text.textSize * 0.9f
+            fill.shader = LinearGradient(cx - lw / 2, 0f, cx + lw / 2, 0f,
+                intArrayOf(withAlpha(Pal.RED, 0), Pal.RED, withAlpha(Pal.RED, 0)), null, Shader.TileMode.CLAMP)
+            c.drawRect(cx - lw / 2, ly, cx + lw / 2, ly + max(1.5f, unit * 0.35f), fill)
+            fill.shader = null
+        }
     }
 
     // ───────────────────────── top strip ─────────────────────────
@@ -623,6 +723,10 @@ class DashRenderer {
         val p = 4.5f * u
         val box = RectF(a.left + p, a.top + 1f * u, a.right - p, a.bottom - p)
         panel(c, box)
+        carPhoto?.let {
+            drawTiresPhoto(c, box, s, it)
+            return
+        }
         val cx = box.centerX()
         val cy = box.centerY() - 1.5f * u
 
@@ -749,6 +853,139 @@ class DashRenderer {
         text.textAlign = Paint.Align.LEFT
     }
 
+    /**
+     * Tires view built around the real photo: the blue CX-5 under a soft spotlight,
+     * rear tires read on the left, front tires on the right (the car faces right),
+     * with leader lines to the two wheels you can see.
+     */
+    private fun drawTiresPhoto(c: Canvas, box: RectF, s: VehicleState, photo: Bitmap) {
+        val now = System.currentTimeMillis()
+        val ar = photo.width.toFloat() / photo.height
+        val colW = box.width() * 0.22f
+        val maxW = box.width() - 2 * colW - 4f * u
+        val maxH = box.height() - 14f * u
+        val pw = min(maxW, maxH * ar)
+        val ph = pw / ar
+        val cx = box.centerX()
+        val cy = box.top + 3f * u + maxH / 2
+        val img = RectF(cx - pw / 2, cy - ph / 2, cx + pw / 2, cy + ph / 2)
+
+        // studio spotlight + floor shadow
+        fill.shader = RadialGradient(cx, cy - ph * 0.05f, max(pw * 0.7f, 1f),
+            withAlpha(Color.parseColor("#26324A"), 150), withAlpha(Color.parseColor("#26324A"), 0), Shader.TileMode.CLAMP)
+        c.drawCircle(cx, cy - ph * 0.05f, pw * 0.7f, fill)
+        fill.shader = null
+        val gy = img.bottom - ph * 0.04f
+        c.save()
+        c.scale(1f, 0.14f, cx, gy)
+        fill.shader = RadialGradient(cx, gy, max(pw * 0.55f, 1f), withAlpha(Color.BLACK, 220), withAlpha(Color.BLACK, 0), Shader.TileMode.CLAMP)
+        c.drawCircle(cx, gy, pw * 0.55f, fill)
+        fill.shader = null
+        c.restore()
+
+        val rearX = img.left + pw * PHOTO_REAR_X
+        val rearY = img.top + ph * PHOTO_REAR_Y
+        val frontX = img.left + pw * PHOTO_FRONT_X
+        val frontY = img.top + ph * PHOTO_FRONT_Y
+
+        // status halos behind the visible wheels
+        for ((w, wx, wy) in listOf(Triple(Wheel.RL, rearX, rearY), Triple(Wheel.FL, frontX, frontY))) {
+            val t = s.tires[w] ?: continue
+            if (now - t.seenAt > 10 * 60_000) continue
+            val col = tireColor(t)
+            if (col == Pal.TEXT) continue
+            fill.shader = RadialGradient(wx, wy, max(ph * 0.32f, 1f), withAlpha(col, 140), withAlpha(col, 0), Shader.TileMode.CLAMP)
+            c.drawCircle(wx, wy, ph * 0.32f, fill)
+            fill.shader = null
+        }
+
+        bmpPaint.colorFilter = null
+        bmpPaint.alpha = 255
+        c.drawBitmap(photo, null, img, bmpPaint)
+
+        // readings: far side on top, near side (the wheels you can see) below
+        val leftX = box.left + 4.5f * u
+        val rightX = box.right - 4.5f * u
+        val topY = box.top + 9f * u
+        val lowY = box.top + box.height() * 0.56f
+        drawReading(c, Wheel.RR, s.tires[Wheel.RR], leftX, topY, Paint.Align.LEFT, colW, now)
+        drawReading(c, Wheel.FR, s.tires[Wheel.FR], rightX, topY, Paint.Align.RIGHT, colW, now)
+        drawReading(c, Wheel.RL, s.tires[Wheel.RL], leftX, lowY, Paint.Align.LEFT, colW, now)
+        drawReading(c, Wheel.FL, s.tires[Wheel.FL], rightX, lowY, Paint.Align.RIGHT, colW, now)
+
+        // leader lines to the visible wheels
+        stroke.shader = null
+        stroke.strokeWidth = 0.22f * u
+        stroke.color = withAlpha(Pal.SILVER, 120)
+        val lx = box.left + 4.5f * u + colW * 0.62f
+        c.drawLine(lx, lowY + 5f * u, rearX - ph * 0.17f, rearY, stroke)
+        fill.color = Pal.TEXT2
+        c.drawCircle(rearX - ph * 0.17f, rearY, 0.6f * u, fill)
+        val rx = box.right - 4.5f * u - colW * 0.62f
+        c.drawLine(rx, lowY + 5f * u, frontX + ph * 0.19f, frontY, stroke)
+        c.drawCircle(frontX + ph * 0.19f, frontY, 0.6f * u, fill)
+
+        text.textAlign = Paint.Align.CENTER
+        caps(c, "${Prefs.carName.uppercase()}  ·  TARGET ${Prefs.targetPsi} PSI  ·  WARN BELOW ${Prefs.tireLowPsi}",
+            cx, box.bottom - 3f * u, box.width() - 8f * u, Pal.SILVER, 2.6f)
+        text.textAlign = Paint.Align.LEFT
+    }
+
+    private fun drawReading(c: Canvas, w: Wheel, t: TireReading?, x: Float, top: Float, align: Paint.Align, maxW: Float, now: Long) {
+        val paired = Prefs.tireId(w) != null
+        val stale = t == null || now - t.seenAt > 10 * 60_000
+        val col = when {
+            !paired -> Pal.DIM
+            stale -> Pal.SILVER
+            else -> t?.let { tireColor(it) } ?: Pal.SILVER
+        }
+        text.textAlign = align
+        caps(c, w.label.uppercase(), x, top, maxW, Pal.SILVER)
+        val psi = when {
+            !paired -> "—"
+            stale -> "––"
+            else -> t?.psi?.roundToInt()?.toString() ?: "––"
+        }
+        text.textAlign = align
+        text.typeface = thin
+        text.textSize = 12f * u
+        text.color = when { !paired -> Pal.DIM; stale -> Pal.SILVER; else -> col }
+        val base = top + 12.4f * u
+        c.drawText(psi, x, base, text)
+        val psiW = text.measureText(psi)
+        if (paired) {
+            text.typeface = medium
+            text.textSize = 2.8f * u
+            text.letterSpacing = 0.2f
+            text.color = Pal.SILVER
+            text.textAlign = Paint.Align.LEFT
+            val unitW = text.measureText("PSI")
+            val ux = if (align == Paint.Align.LEFT) x + psiW + 1.2f * u else x - psiW - 1.2f * u - unitW
+            c.drawText("PSI", ux, base, text)
+            text.letterSpacing = 0f
+        }
+        // status tick under the number
+        if (paired && !stale) {
+            fill.color = if (col == Pal.TEXT) Pal.RED else col
+            val bx = if (align == Paint.Align.LEFT) x else x - 6f * u
+            r2.set(bx, base + 1.8f * u, bx + 6f * u, base + 2.3f * u)
+            c.drawRoundRect(r2, 0.25f * u, 0.25f * u, fill)
+        }
+        val detail = when {
+            !paired -> "PAIR ON PHONE"
+            t == null -> "WAITING"
+            else -> buildList {
+                t.tempF?.let { add("${it.roundToInt()}°F") }
+                t.battery?.let { add("BATT $it%") }
+                val age = (now - t.seenAt) / 60_000
+                if (age >= 2) add("${age}M AGO")
+            }.joinToString("  ·  ")
+        }
+        text.textAlign = align
+        caps(c, detail, x, base + 6.4f * u, maxW, Pal.TEXT2, 2.5f)
+        text.textAlign = Paint.Align.LEFT
+    }
+
     private fun tireColor(t: TireReading): Int = when {
         t.psi < Prefs.tireLowPsi - 4 -> Pal.ALARM
         t.psi < Prefs.tireLowPsi || t.psi > Prefs.tireHighPsi -> Pal.AMBER
@@ -842,4 +1079,14 @@ class DashRenderer {
     }
 
     private fun withAlpha(color: Int, a: Int) = (color and 0x00FFFFFF) or (a.coerceIn(0, 255) shl 24)
+
+    companion object {
+        const val INTRO_HOLD_MS = 2200
+        const val INTRO_MS = 2800
+        /** Where the two visible wheels sit in the photo (fractions of its width/height). */
+        const val PHOTO_REAR_X = 0.085f
+        const val PHOTO_REAR_Y = 0.62f
+        const val PHOTO_FRONT_X = 0.52f
+        const val PHOTO_FRONT_Y = 0.78f
+    }
 }

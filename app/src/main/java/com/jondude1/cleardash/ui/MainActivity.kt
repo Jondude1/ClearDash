@@ -1,6 +1,19 @@
 package com.jondude1.cleardash.ui
 
+import android.graphics.BitmapFactory
 import android.os.Bundle
+import androidx.compose.foundation.Canvas
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.withFrameMillis
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
+import com.jondude1.cleardash.R
+import com.jondude1.cleardash.render.DashRenderer
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -42,7 +55,15 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent { ClearDashTheme { AppRoot() } }
+        setContent {
+            ClearDashTheme {
+                var intro by rememberSaveable { mutableStateOf(true) }
+                Box(Modifier.fillMaxSize().background(Color.Black)) {
+                    AppRoot()
+                    if (intro) IntroOverlay { intro = false }
+                }
+            }
+        }
     }
 
     override fun onStart() {
@@ -146,5 +167,35 @@ private fun UpdateBanner() {
             LinearProgressIndicator(progress = { s.percent / 100f }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
         }
         else -> {}
+    }
+}
+
+/** Startup sequence on the phone — the same one the car plays. Tap to skip. */
+@Composable
+private fun IntroOverlay(onDone: () -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val renderer = remember {
+        DashRenderer().apply {
+            carPhoto = try { BitmapFactory.decodeResource(ctx.resources, R.drawable.cx5_blue) } catch (_: Exception) { null }
+        }
+    }
+    val start = remember { System.currentTimeMillis() }
+    var now by remember { mutableLongStateOf(start) }
+    LaunchedEffect(Unit) {
+        while (now - start < DashRenderer.INTRO_MS) withFrameMillis { now = System.currentTimeMillis() }
+        onDone()
+    }
+    val e = now - start
+    val fade = if (e < DashRenderer.INTRO_HOLD_MS) 1f
+    else 1f - (e - DashRenderer.INTRO_HOLD_MS) / (DashRenderer.INTRO_MS - DashRenderer.INTRO_HOLD_MS).toFloat()
+    Canvas(
+        Modifier
+            .fillMaxSize()
+            .alpha(fade.coerceIn(0f, 1f))
+            .clickableNoRipple { onDone() }
+    ) {
+        drawIntoCanvas {
+            renderer.drawIntro(it.nativeCanvas, size.width, size.height, e.coerceAtMost(DashRenderer.INTRO_HOLD_MS.toLong()))
+        }
     }
 }

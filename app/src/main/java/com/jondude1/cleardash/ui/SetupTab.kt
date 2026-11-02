@@ -573,5 +573,6 @@ private fun UpdatesCard() {
                 Pill("Install ${a.release.tag}", C.green) { scope.launch { Updater.downloadAndInstall(ctx, a.release) } }
             }
         }
+        Hint("CX-5 photo by Ghostofakina, Wikimedia Commons, CC BY-SA 4.0 — background removed, plate blurred. ClearDash is not affiliated with Mazda.")
     }
 }

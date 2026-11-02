@@ -1,6 +1,9 @@
 package com.jondude1.cleardash.ui
 
+import android.graphics.BitmapFactory
 import android.graphics.RectF
+import androidx.compose.ui.platform.LocalContext
+import com.jondude1.cleardash.R
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -40,7 +43,12 @@ import kotlin.math.roundToInt
 @Composable
 fun LiveTab() {
     val state by DataHub.state.collectAsState()
-    val renderer = remember { DashRenderer() }
+    val ctx = LocalContext.current
+    val renderer = remember {
+        DashRenderer().apply {
+            carPhoto = try { BitmapFactory.decodeResource(ctx.resources, R.drawable.cx5_blue) } catch (_: Exception) { null }
+        }
+    }
     var mode by remember { mutableStateOf(DashMode.DASH) }
     var tick by remember { mutableLongStateOf(0L) }
     LaunchedEffect(Unit) {

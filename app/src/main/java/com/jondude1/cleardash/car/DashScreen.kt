@@ -1,5 +1,6 @@
 package com.jondude1.cleardash.car
 
+import android.graphics.BitmapFactory
 import android.graphics.Rect
 import android.graphics.RectF
 import android.os.Handler
@@ -53,6 +54,7 @@ class DashScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback, DefaultLifecyc
     private val thread = HandlerThread("dash-render").apply { start() }
     private val handler = Handler(thread.looper)
     @Volatile private var running = false
+    private var introPlayed = false
 
     // knob gesture accumulation
     private var knobAcc = 0f
@@ -67,6 +69,11 @@ class DashScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback, DefaultLifecyc
 
     init {
         lifecycle.addObserver(this)
+        renderer.carPhoto = try {
+            BitmapFactory.decodeResource(carContext.resources, R.drawable.cx5_blue)
+        } catch (_: Exception) {
+            null
+        }
         carContext.getCarService(AppManager::class.java).setSurfaceCallback(this)
         // Rebuild the buttons only when the media controls actually need to change.
         lifecycleScope.launch {
@@ -94,6 +101,11 @@ class DashScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback, DefaultLifecyc
 
     override fun onSurfaceAvailable(surfaceContainer: SurfaceContainer) {
         synchronized(lock) { container = surfaceContainer }
+        // play the startup sequence once per drive, when the screen first appears
+        if (!introPlayed) {
+            introPlayed = true
+            renderer.startIntro()
+        }
     }
 
     override fun onSurfaceDestroyed(surfaceContainer: SurfaceContainer) {
