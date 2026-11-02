@@ -132,7 +132,7 @@ private fun PermissionsCard(recheck: Int, onChanged: () -> Unit) {
     SectionCard("Get started", "Grant access once, then everything runs on its own when your phone connects to the car.") {
         StatusLine("Location, Bluetooth, alerts", if (allBase) "Allowed" else "Needed", allBase)
         StatusLine("Location with screen off", if (bgLoc) "Allowed" else "Recommended", if (bgLoc) true else null)
-        StatusLine("Turn-by-turn from Google Maps", if (listener) "Allowed" else "Needed", listener)
+        StatusLine("Turn info & now playing", if (listener) "Allowed" else "Needed", listener)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (!allBase) Pill("Allow access") { launcher.launch(basePermissions()) }
             if (allBase && !bgLoc) Pill("Allow all the time") { bgLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION) }

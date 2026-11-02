@@ -17,6 +17,7 @@ class NavListenerService : NotificationListenerService() {
     private val navApps = setOf("com.google.android.apps.maps", "com.waze")
 
     override fun onListenerConnected() {
+        if (DataHub.isRunning) MediaSource.start(this)
         try {
             activeNotifications?.forEach { handle(it) }
         } catch (_: Exception) {

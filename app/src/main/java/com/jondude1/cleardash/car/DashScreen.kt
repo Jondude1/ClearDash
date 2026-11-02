@@ -17,11 +17,17 @@ import androidx.car.app.model.ActionStrip
 import androidx.car.app.model.CarIcon
 import androidx.car.app.model.Template
 import androidx.car.app.navigation.model.NavigationTemplate
+import androidx.car.app.versioning.CarAppApiLevels
 import androidx.core.graphics.drawable.IconCompat
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import com.jondude1.cleardash.R
 import com.jondude1.cleardash.data.DataHub
+import com.jondude1.cleardash.data.MediaSource
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import com.jondude1.cleardash.data.Prefs
 import com.jondude1.cleardash.render.DashMode
 import com.jondude1.cleardash.render.DashRenderer
@@ -47,6 +53,13 @@ class DashScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback, DefaultLifecyc
     init {
         lifecycle.addObserver(this)
         carContext.getCarService(AppManager::class.java).setSurfaceCallback(this)
+        // Rebuild the buttons only when the media controls actually need to change.
+        lifecycleScope.launch {
+            DataHub.state
+                .map { st -> st.media?.let { Pair(it.playing, it.longForm) } }
+                .distinctUntilChanged()
+                .collect { invalidate() }
+        }
     }
 
     override fun onStart(owner: LifecycleOwner) {
@@ -125,6 +138,25 @@ class DashScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback, DefaultLifecyc
                     .build()
             )
             .build()
-        return NavigationTemplate.Builder().setActionStrip(strip).build()
+        val b = NavigationTemplate.Builder().setActionStrip(strip)
+        val media = DataHub.state.value.media
+        if (media != null && carContext.carAppApiLevel >= CarAppApiLevels.LEVEL_2) {
+            val mediaStrip = ActionStrip.Builder()
+                .addAction(
+                    Action.Builder().setIcon(icon(if (media.longForm) R.drawable.ic_media_rewind else R.drawable.ic_media_prev))
+                        .setOnClickListener { MediaSource.back() }.build()
+                )
+                .addAction(
+                    Action.Builder().setIcon(icon(if (media.playing) R.drawable.ic_media_pause else R.drawable.ic_ha_play))
+                        .setOnClickListener { MediaSource.playPause() }.build()
+                )
+                .addAction(
+                    Action.Builder().setIcon(icon(if (media.longForm) R.drawable.ic_media_ffwd else R.drawable.ic_media_next))
+                        .setOnClickListener { MediaSource.forward() }.build()
+                )
+                .build()
+            b.setMapActionStrip(mediaStrip)
+        }
+        return b.build()
     }
 }

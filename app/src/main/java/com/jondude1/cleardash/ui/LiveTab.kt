@@ -30,6 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.jondude1.cleardash.data.DataHub
+import com.jondude1.cleardash.data.MediaSource
 import com.jondude1.cleardash.data.Severity
 import com.jondude1.cleardash.render.DashMode
 import com.jondude1.cleardash.render.DashRenderer
@@ -87,6 +88,17 @@ fun LiveTab() {
             }
         }
 
+        state.media?.let { m ->
+            SectionCard("Now playing", m.title.ifEmpty { m.appName }) {
+                Hint(listOf(m.artist, m.appName).filter { it.isNotBlank() }.distinct().joinToString(" · "))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Pill(if (m.longForm) "−30s" else "Previous") { MediaSource.back() }
+                    Pill(if (m.playing) "Pause" else "Play", C.green) { MediaSource.playPause() }
+                    Pill(if (m.longForm) "+30s" else "Next") { MediaSource.forward() }
+                }
+            }
+        }
+
         SectionCard("Sources") {
             StatusLine("GPS", if (state.gpsOk) "${(state.speedMph ?: 0f).roundToInt()} mph" else "No fix", state.gpsOk)
             StatusLine("Speed limit", state.speedLimitMph?.let { "$it mph" } ?: "Unknown", state.speedLimitMph != null)
@@ -95,6 +107,7 @@ fun LiveTab() {
             val fresh = state.tires.values.count { System.currentTimeMillis() - it.seenAt < 120_000 }
             StatusLine("Tire sensors", if (state.tires.isEmpty()) "None heard yet" else "$fresh of 4 reporting", fresh > 0)
             StatusLine("Home Assistant", state.haStatus, state.haStatus == "Connected")
+            StatusLine("Now playing", state.media?.appName ?: "Nothing playing", state.media != null)
         }
     }
 }

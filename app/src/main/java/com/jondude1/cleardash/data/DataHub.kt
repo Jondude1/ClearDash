@@ -87,6 +87,7 @@ object DataHub {
 
         location = LocationSource(app).also { it.start() }
         tpms = TpmsSource(app).also { it.startBackground() }
+        MediaSource.start(app)
         s.launch { SpeedLimitSource.run() }
         s.launch { ObdSource(app).run() }
         s.launch { AlertEngine.run() }
@@ -120,6 +121,7 @@ object DataHub {
     private fun stopAll() {
         location?.stop(); location = null
         tpms?.stopBackground(); tpms = null
+        MediaSource.stop()
         scope?.cancel(); scope = null
         update {
             it.copy(

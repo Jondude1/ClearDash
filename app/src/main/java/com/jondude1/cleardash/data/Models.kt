@@ -57,7 +57,28 @@ data class CarAlert(
     val at: Long = System.currentTimeMillis(),
 )
 
+data class MediaInfo(
+    val packageName: String,
+    val appName: String,
+    val title: String,
+    val artist: String,
+    val art: Bitmap?,
+    val durationMs: Long,
+    val positionMs: Long,
+    val positionAt: Long,
+    val speed: Float,
+    val playing: Boolean,
+    /** Audiobooks and podcasts: skip buttons jump 30 s instead of changing track. */
+    val longForm: Boolean,
+) {
+    fun livePosition(now: Long = android.os.SystemClock.elapsedRealtime()): Long {
+        val p = if (playing) positionMs + ((now - positionAt) * speed).toLong() else positionMs
+        return if (durationMs > 0) p.coerceIn(0, durationMs) else p.coerceAtLeast(0)
+    }
+}
+
 data class VehicleState(
+    val media: MediaInfo? = null,
     val speedMph: Float? = null,
     val gpsOk: Boolean = false,
     val lat: Double? = null,
