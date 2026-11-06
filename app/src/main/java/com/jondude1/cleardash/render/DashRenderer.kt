@@ -244,7 +244,6 @@ class DashRenderer {
             "GPS" to s.gpsOk,
             "OBD" to s.obd.connected,
             "TIRES" to s.tires.values.any { System.currentTimeMillis() - it.seenAt < 120_000 },
-            "HOME" to (s.haStatus == "Connected"),
         )
         text.typeface = medium
         text.textSize = 2.8f * u

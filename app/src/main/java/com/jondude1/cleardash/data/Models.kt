@@ -21,6 +21,15 @@ data class TireReading(
     val battery: Int?,
     val alarm: Boolean,
     val seenAt: Long,
+    /** Position number printed/encoded by some cap sets (1..4), when the broadcast carries it. */
+    val sensorIndex: Int? = null,
+)
+
+/** One diagnostic trouble code (check-engine fault), stored or pending. */
+data class Dtc(
+    val code: String,
+    val description: String,
+    val pending: Boolean,
 )
 
 data class ObdData(
@@ -35,17 +44,8 @@ data class ObdData(
     val fuelPct: Int? = null,
     val stft: Float? = null,
     val ltft: Float? = null,
+    val dtcs: List<Dtc> = emptyList(),
 )
-
-data class HaEntity(
-    val id: String,
-    val name: String,
-    val state: String,
-) {
-    val domain: String get() = id.substringBefore('.')
-    val isOn: Boolean
-        get() = state in setOf("on", "open", "opening", "unlocked", "armed_away", "armed_home", "armed_night", "playing")
-}
 
 enum class Severity { INFO, WARN, CRITICAL }
 
@@ -88,7 +88,6 @@ data class VehicleState(
     val obd: ObdData = ObdData(),
     val tires: Map<Wheel, TireReading> = emptyMap(),
     val tpmsScanning: Boolean = false,
-    val haStatus: String = "Not set up",
     val activeAlerts: List<CarAlert> = emptyList(),
     val running: Boolean = false,
 ) {

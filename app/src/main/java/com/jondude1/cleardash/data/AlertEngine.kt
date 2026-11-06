@@ -57,6 +57,15 @@ object AlertEngine {
                 if (rpm > 600 && v < 13.0f) active += CarAlert("charging", "Charging voltage low", "%.1f V with the engine running".format(v), Severity.WARN)
                 if (rpm < 100 && v < 11.9f) active += CarAlert("battery", "Battery low", "%.1f V".format(v), Severity.WARN)
             }
+            // Check-engine fault codes: each new code raises once (the repeat/forget
+            // machinery below re-raises a code only if it clears and comes back).
+            for (d in o.dtcs) {
+                active += CarAlert(
+                    "dtc_${d.code}", "Check engine: ${d.code}",
+                    d.description + if (d.pending) " (pending)" else "",
+                    Severity.WARN,
+                )
+            }
         }
 
         DataHub.update { it.copy(activeAlerts = active) }

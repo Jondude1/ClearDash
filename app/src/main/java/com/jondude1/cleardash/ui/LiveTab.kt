@@ -114,7 +114,6 @@ fun LiveTab() {
             StatusLine("OBD (Veepeak)", state.obd.status, state.obd.connected)
             val fresh = state.tires.values.count { System.currentTimeMillis() - it.seenAt < 120_000 }
             StatusLine("Tire sensors", if (state.tires.isEmpty()) "None heard yet" else "$fresh of 4 reporting", fresh > 0)
-            StatusLine("Home Assistant", state.haStatus, state.haStatus == "Connected")
             StatusLine("Now playing", state.media?.appName ?: "Nothing playing", state.media != null)
         }
     }

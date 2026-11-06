@@ -31,9 +31,6 @@ object DataHub {
     private val _alerts = MutableSharedFlow<CarAlert>(extraBufferCapacity = 16)
     val alerts: SharedFlow<CarAlert> = _alerts
 
-    private val _homeArrival = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
-    val homeArrival: SharedFlow<Unit> = _homeArrival
-
     private var refs = 0
     private var scope: CoroutineScope? = null
     private var location: LocationSource? = null
@@ -47,10 +44,6 @@ object DataHub {
 
     fun emitAlert(a: CarAlert) {
         _alerts.tryEmit(a)
-    }
-
-    fun emitHomeArrival() {
-        _homeArrival.tryEmit(Unit)
     }
 
     @Synchronized
@@ -91,7 +84,17 @@ object DataHub {
         s.launch { SpeedLimitSource.run() }
         s.launch { ObdSource(app).run() }
         s.launch { AlertEngine.run() }
-        s.launch { HomeWatcher.run() }
+        s.launch {
+            // Once per start: if the VePEAK or any wheel is still unconfigured, run the
+            // check → select → verify auto-selector in the background, then re-arm the
+            // filtered tire scan it borrowed the radio from.
+            delay(3_000)
+            if (AutoSelector.needsSetup()) {
+                AutoSelector.scanAndSelect(app, 45_000)
+                tpms?.stopBackground()
+                tpms?.startBackground()
+            }
+        }
         s.launch {
             // Re-arm the tire scan filters when sensors are assigned or changed.
             var lastIds = Wheel.entries.map { Prefs.tireId(it) }
@@ -103,17 +106,6 @@ object DataHub {
                     tpms?.startBackground()
                     update { st -> st.copy(tires = st.tires.filterKeys { w -> Prefs.tireId(w) != null }) }
                 }
-            }
-        }
-        s.launch {
-            while (true) {
-                if (Prefs.haConfigured) {
-                    val ok = HomeAssistant.ping()
-                    update { it.copy(haStatus = if (ok) "Connected" else "Can't reach Home Assistant") }
-                } else {
-                    update { it.copy(haStatus = "Not set up") }
-                }
-                delay(60_000)
             }
         }
     }

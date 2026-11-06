@@ -70,7 +70,7 @@ class DataService : Service() {
         return NotificationCompat.Builder(this, ClearDashApp.CH_SERVICE)
             .setSmallIcon(R.drawable.ic_stat)
             .setContentTitle("ClearDash is live")
-            .setContentText("Reading GPS, OBD, tires and Home Assistant")
+            .setContentText("Reading GPS, OBD and tires")
             .setContentIntent(pi)
             .setOngoing(true)
             .build()

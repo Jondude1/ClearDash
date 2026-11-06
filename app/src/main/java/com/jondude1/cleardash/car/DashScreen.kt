@@ -9,9 +9,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.car.app.AppManager
 import androidx.car.app.CarContext
-import androidx.car.app.CarToast
 import androidx.car.app.Screen
-import androidx.car.app.ScreenManager
 import androidx.car.app.SurfaceCallback
 import androidx.car.app.SurfaceContainer
 import androidx.car.app.model.Action
@@ -27,7 +25,6 @@ import androidx.lifecycle.lifecycleScope
 import com.jondude1.cleardash.R
 import com.jondude1.cleardash.data.DataHub
 import com.jondude1.cleardash.data.MediaSource
-import com.jondude1.cleardash.data.Prefs
 import com.jondude1.cleardash.render.DashMode
 import com.jondude1.cleardash.render.DashRenderer
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -40,7 +37,7 @@ import kotlin.math.ln
  * The main car screen: a custom-drawn dashboard.
  *
  * Built for the CX-5 commander knob, since Mazda locks the touchscreen while moving:
- *  • Nudge the knob to reach the side buttons (Drive / Gauges / Tires / Home) and the
+ *  • Nudge the knob to reach the side buttons (Drive / Gauges / Tires) and the
  *    media buttons (back · play/pause · forward); press the knob to select.
  *  • Select the "move" button, then simply turn the knob to flip between views.
  *  • Parked, tapping the screen also flips views.
@@ -187,13 +184,6 @@ class DashScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback, DefaultLifecyc
             .addAction(action(R.drawable.ic_stat) { setMode(DashMode.DASH) })
             .addAction(action(R.drawable.ic_act_gauges) { setMode(DashMode.GAUGES) })
             .addAction(action(R.drawable.ic_act_tire) { setMode(DashMode.TIRES) })
-            .addAction(action(R.drawable.ic_act_home) {
-                if (Prefs.haConfigured) {
-                    carContext.getCarService(ScreenManager::class.java).push(HomeScreen(carContext))
-                } else {
-                    CarToast.makeText(carContext, "Set up Home Assistant in the ClearDash phone app", CarToast.LENGTH_LONG).show()
-                }
-            })
             .build()
         val b = NavigationTemplate.Builder().setActionStrip(strip)
 
@@ -204,7 +194,7 @@ class DashScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback, DefaultLifecyc
             val media = DataHub.state.value.media
             if (media != null) {
                 map.addAction(action(if (media.longForm) R.drawable.ic_media_rewind else R.drawable.ic_media_prev) { MediaSource.back() })
-                map.addAction(action(if (media.playing) R.drawable.ic_media_pause else R.drawable.ic_ha_play) { MediaSource.playPause() })
+                map.addAction(action(if (media.playing) R.drawable.ic_media_pause else R.drawable.ic_media_play) { MediaSource.playPause() })
                 map.addAction(action(if (media.longForm) R.drawable.ic_media_ffwd else R.drawable.ic_media_next) { MediaSource.forward() })
             }
             map.addAction(Action.PAN)

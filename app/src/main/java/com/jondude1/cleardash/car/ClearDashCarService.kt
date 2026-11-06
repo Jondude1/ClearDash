@@ -3,7 +3,6 @@ package com.jondude1.cleardash.car
 import android.content.Intent
 import androidx.car.app.CarAppService
 import androidx.car.app.CarToast
-import androidx.car.app.ScreenManager
 import androidx.car.app.Screen
 import androidx.car.app.Session
 import androidx.car.app.AppManager
@@ -17,7 +16,6 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import com.jondude1.cleardash.data.CarAlert
 import com.jondude1.cleardash.data.DataHub
-import com.jondude1.cleardash.data.Prefs
 import kotlinx.coroutines.launch
 
 class ClearDashCarService : CarAppService() {
@@ -43,13 +41,6 @@ class DashSession : Session() {
             }
         })
         lifecycleScope.launch { DataHub.alerts.collect { show(it) } }
-        lifecycleScope.launch {
-            DataHub.homeArrival.collect {
-                if (!Prefs.haConfigured) return@collect
-                val sm = carContext.getCarService(ScreenManager::class.java)
-                if (sm.top !is HomeScreen) sm.push(HomeScreen(carContext, arrived = true))
-            }
-        }
         return DashScreen(carContext)
     }
 

@@ -30,6 +30,10 @@ object Prefs {
     var obdBle: Boolean
         get() = sp.getBoolean("obd_ble", false)
         set(v) = edit { putBoolean("obd_ble", v) }
+    /** True when the saved adapter was found + ELM-verified by the auto-selector (not hand-picked). */
+    var obdAutoSelected: Boolean
+        get() = sp.getBoolean("obd_auto", false)
+        set(v) = edit { putBoolean("obd_auto", v) }
 
     // Tires
     fun tireId(w: Wheel): String? = sp.getString("tire_${w.name}", null)
@@ -39,6 +43,18 @@ object Prefs {
         if (id == null) remove("tire_${w.name}") else putString("tire_${w.name}", id)
     }
     fun wheelFor(id: String): Wheel? = Wheel.entries.firstOrNull { tireId(it) == id }
+
+    /**
+     * Reassigns caps between wheels (tire rotation). [newToOld] maps each NEW wheel to the
+     * OLD wheel whose sensor moves to it. All current ids are read before any are written.
+     */
+    fun remapTires(newToOld: Map<Wheel, Wheel>) = edit {
+        val current = Wheel.entries.associateWith { sp.getString("tire_${it.name}", null) }
+        for ((newWheel, oldWheel) in newToOld) {
+            val id = current[oldWheel]
+            if (id == null) remove("tire_${newWheel.name}") else putString("tire_${newWheel.name}", id)
+        }
+    }
 
     var tireLowPsi: Int
         get() = sp.getInt("tire_low", 32)
@@ -58,27 +74,14 @@ object Prefs {
         get() = sp.getFloat("tank_gal", 14.8f)
         set(v) = edit { putFloat("tank_gal", v) }
 
-    // Home Assistant
-    var haUrl: String
-        get() = sp.getString("ha_url", "") ?: ""
-        set(v) = edit { putString("ha_url", v.trim().trimEnd('/')) }
-    var haToken: String
-        get() = sp.getString("ha_token", "") ?: ""
-        set(v) = edit { putString("ha_token", v.trim()) }
-    var haEntities: List<String>
-        get() = (sp.getString("ha_entities", "") ?: "").split(',').filter { it.isNotBlank() }
-        set(v) = edit { putString("ha_entities", v.joinToString(",")) }
-    val haConfigured: Boolean get() = haUrl.isNotBlank() && haToken.isNotBlank()
-
-    var homeLat: Double?
-        get() = sp.getString("home_lat", null)?.toDoubleOrNull()
-        set(v) = edit { putString("home_lat", v?.toString()) }
-    var homeLon: Double?
-        get() = sp.getString("home_lon", null)?.toDoubleOrNull()
-        set(v) = edit { putString("home_lon", v?.toString()) }
-    var homeRadiusM: Int
-        get() = sp.getInt("home_radius", 250)
-        set(v) = edit { putInt("home_radius", v) }
+    // Auto-selector results
+    /** Addresses of the tire caps that passed the auto-selector's stability/plausibility check. */
+    var tpmsAutoSet: List<String>
+        get() = (sp.getString("tpms_auto_set", "") ?: "").split(',').filter { it.isNotBlank() }
+        set(v) = edit { putString("tpms_auto_set", v.distinct().joinToString(",")) }
+    var autoSelectLastRun: Long
+        get() = sp.getLong("auto_sel_last", 0L)
+        set(v) = edit { putLong("auto_sel_last", v) }
 
     var lastUpdateCheck: Long
         get() = sp.getLong("upd_check", 0L)

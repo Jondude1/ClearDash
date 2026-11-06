@@ -4,9 +4,23 @@ An Android Auto dashboard for the CX-5 that pulls everything into one screen:
 
 - **Speed** from GPS (OBD as fallback) with the **speed limit** from OpenStreetMap
 - **Next turn** from Google Maps / Waze while they navigate in the background
-- **Engine data** from a Veepeak OBD2 adapter (classic Bluetooth or BLE)
-- **Tire pressure & temperature** from Bluetooth valve-cap sensors
-- **Home Assistant** controls over Tailscale, popping up automatically when you get home
+- **Engine data** from a VePEAK OBD2 adapter (classic Bluetooth or BLE) — ClearDash finds the
+  adapter itself and *verifies* it with a live ELM327 handshake (ATZ/ATI identity, supply
+  voltage, engine-data probe) before trusting it; a hand-picked adapter is never overwritten
+- **Tire pressure & temperature** from Bluetooth valve-cap sensors — the 4 caps are
+  auto-found and *verified* during a scan (each must report a stable, plausible pressure
+  several times) before being saved
+- **Wheel assignment by proof-of-change**: the setup wizard asks you to let a little air
+  out of one tire at a time (or unscrew/re-screw its cap) — the sensor whose reading
+  changes is assigned to that wheel, so a cap is never placed on the wrong corner by a guess
+- **Verify-all checklist** in Setup: permissions, turn-info listener, GPS, the VePEAK and all
+  4 caps each show pass/fail from live state, with a one-tap full re-verification
+- **Check-engine fault codes**: stored + pending DTCs are read about every 30 s (read-only —
+  codes are never cleared), decoded to plain English, shown in Setup and raised as alerts
+- **Tire rotation remap**: one tap reassigns the caps after a front↔back or cross-pattern
+  rotation, or re-runs the wheel-learning wizard
+- **Settings backup / restore**: export your adapter + cap assignments and preferences as
+  text and re-import them after a reinstall, so a forced uninstall no longer wipes your setup
 - **Alerts** for low/leaking tires, overheating and charging problems, on the car screen and the phone
 
 Built by GitHub Actions on every push to `main` and published as a GitHub Release.

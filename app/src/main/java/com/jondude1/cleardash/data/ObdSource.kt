@@ -195,7 +195,7 @@ class ObdSource(private val context: Context) {
         while (true) {
             val addr = Prefs.obdAddress
             if (addr == null) {
-                status("Not set up")
+                status("Looking for your VePEAK…")
                 delay(5_000); continue
             }
             val bt = adapter
@@ -264,6 +264,18 @@ class ObdSource(private val context: Context) {
                     stft = pid(link.send("0106"), "06")?.let { (it[0] - 128) * 100f / 128f } ?: o.stft,
                     ltft = pid(link.send("0107"), "07")?.let { (it[0] - 128) * 100f / 128f } ?: o.ltft,
                 )
+            }
+            // Fault codes (stored mode 03 + pending mode 07) about every 30 s of polling.
+            // Read-only: ClearDash never sends mode 04 (code clearing).
+            if (tick % 200 == 0) {
+                val stored = Dtcs.parse(link.send("03"), "43", pending = false)
+                val pending = Dtcs.parse(link.send("07"), "47", pending = true)
+                if (stored != null || pending != null) {
+                    val s = stored ?: o.dtcs.filter { !it.pending }
+                    val p = (pending ?: o.dtcs.filter { it.pending })
+                        .filter { pd -> s.none { it.code == pd.code } }
+                    o = o.copy(dtcs = s + p)
+                }
             }
             DataHub.update { it.copy(obd = o.copy(connected = true, status = "Connected")) }
             tick++

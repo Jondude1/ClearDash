@@ -21,6 +21,10 @@ data class SeenSensor(
     val lastSeen: Long,
     val decoded: TireReading?,
     val rawHex: String,
+    val serviceUuids: List<String> = emptyList(),
+    val seenCount: Int = 1,
+    val firstSeen: Long = lastSeen,
+    val avgRssi: Float = rssi.toFloat(),
 )
 
 /** Shared registry of what the tire scanner has heard, plus a raw log for decoding new brands. */
@@ -28,12 +32,40 @@ object TpmsRegistry {
     private val _seen = MutableStateFlow<Map<String, SeenSensor>>(emptyMap())
     val seen: StateFlow<Map<String, SeenSensor>> = _seen
     private val logs = HashMap<String, ArrayDeque<String>>()
+    private val history = HashMap<String, ArrayDeque<TireReading>>()
+
+    /** Every decoded reading heard from one address, oldest first — the auto-selector verifies against this. */
+    fun readingsFor(address: String): List<TireReading> = synchronized(history) {
+        history[address]?.toList() ?: emptyList()
+    }
 
     fun record(address: String, name: String?, rssi: Int, record: ScanRecord?) {
         val raw = record?.bytes?.let { hex(trimAdv(it)) } ?: ""
         val decoded = record?.let { TpmsDecoder.decode(address, it) }
+        val now = System.currentTimeMillis()
+        if (decoded != null) {
+            synchronized(history) {
+                val q = history.getOrPut(address) { ArrayDeque() }
+                q.addLast(decoded)
+                while (q.size > 60) q.removeFirst()
+            }
+        }
         _seen.update { m ->
-            m + (address to SeenSensor(address, name ?: record?.deviceName, rssi, System.currentTimeMillis(), decoded, raw))
+            val prev = m[address]
+            val count = (prev?.seenCount ?: 0) + 1
+            val avg = if (prev == null) rssi.toFloat() else (prev.avgRssi * prev.seenCount + rssi) / count
+            m + (address to SeenSensor(
+                address = address,
+                name = name ?: record?.deviceName ?: prev?.name,
+                rssi = rssi,
+                lastSeen = now,
+                decoded = decoded ?: prev?.decoded,
+                rawHex = raw,
+                serviceUuids = record?.serviceUuids?.map { it.uuid.toString() } ?: prev?.serviceUuids ?: emptyList(),
+                seenCount = count,
+                firstSeen = prev?.firstSeen ?: now,
+                avgRssi = avg,
+            ))
         }
         synchronized(logs) {
             val q = logs.getOrPut(address) { ArrayDeque() }
@@ -52,6 +84,7 @@ object TpmsRegistry {
 
     fun clear() {
         _seen.value = emptyMap()
+        synchronized(history) { history.clear() }
     }
 
     private fun trimAdv(b: ByteArray): ByteArray {
@@ -79,6 +112,14 @@ object TpmsDecoder {
                 val tempC = le32(d, 10).toInt() / 100f
                 val psi = pa / 1000f * 0.145038f
                 if (psi in 0f..150f && tempC in -40f..130f) {
+                    // ZEEPIN-style sets encode the cap number in the first data byte:
+                    // 0x80..0x83 = caps 1..4; some clones use a plain 1..4.
+                    val b0 = d[0].toInt() and 0xFF
+                    val sensorIndex = when {
+                        b0 in 0x80..0x83 -> b0 - 0x7F
+                        b0 in 1..4 -> b0
+                        else -> null
+                    }
                     return TireReading(
                         id = address,
                         psi = psi,
@@ -86,6 +127,7 @@ object TpmsDecoder {
                         battery = (d[14].toInt() and 0xFF).takeIf { it in 0..100 },
                         alarm = d[15].toInt() != 0,
                         seenAt = System.currentTimeMillis(),
+                        sensorIndex = sensorIndex,
                     )
                 }
             }

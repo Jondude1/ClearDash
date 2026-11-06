@@ -70,23 +70,3 @@ object SpeedLimitSource {
     }
 }
 
-/** Notices arriving home so the car can pop up the Home Assistant controls. */
-object HomeWatcher {
-    suspend fun run() {
-        var wasAway = true
-        while (true) {
-            val s = DataHub.state.value
-            val hLat = Prefs.homeLat
-            val hLon = Prefs.homeLon
-            if (s.gpsOk && s.lat != null && s.lon != null && hLat != null && hLon != null) {
-                val d = Geo.distanceM(s.lat, s.lon, hLat, hLon)
-                if (d > Prefs.homeRadiusM * 2) wasAway = true
-                if (wasAway && d < Prefs.homeRadiusM) {
-                    wasAway = false
-                    DataHub.emitHomeArrival()
-                }
-            }
-            delay(3_000)
-        }
-    }
-}
