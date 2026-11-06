@@ -18,12 +18,18 @@ android {
         versionName = "1.0.$runNumber"
     }
 
+    // Signing material never lives in the repo. CI restores the keystore from
+    // the KEYSTORE_BASE64 GitHub secret and passes the passwords via env vars.
+    // For a local signed build, copy your keystore to
+    // keystore/cleardash-release.jks (gitignored) and export the same env vars.
     signingConfigs {
         create("cleardash") {
-            storeFile = rootProject.file("keystore/cleardash.jks")
-            storePassword = "cleardash"
-            keyAlias = "cleardash"
-            keyPassword = "cleardash"
+            storeFile = rootProject.file(
+                System.getenv("KEYSTORE_FILE") ?: "keystore/cleardash-release.jks"
+            )
+            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
+            keyAlias = System.getenv("KEY_ALIAS") ?: "cleardash"
+            keyPassword = System.getenv("KEY_PASSWORD") ?: ""
         }
     }
 

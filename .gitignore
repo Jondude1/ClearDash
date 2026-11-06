@@ -5,3 +5,8 @@ local.properties
 .idea/
 *.iml
 .kotlin/
+
+# Signing material — never commit (lives in GitHub Secrets + owner's backup)
+keystore/
+*.jks
+*.keystore
