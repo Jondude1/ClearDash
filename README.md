@@ -22,6 +22,7 @@ An Android Auto dashboard for the CX-5 that pulls everything into one screen:
 - **Settings backup / restore**: export your adapter + cap assignments and preferences as
   text and re-import them after a reinstall, so a forced uninstall no longer wipes your setup
 - **Alerts** for low/leaking tires, overheating and charging problems, on the car screen and the phone
+- **Look**: sporty black + Soul Red — near-black panels, thick segmented gauges, and big high-contrast type that stays readable in daylight on the CX-5's screen
 
 Built by GitHub Actions on every push to `main` and published as a GitHub Release.
 The app checks for new releases and updates itself.

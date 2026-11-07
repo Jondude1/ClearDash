@@ -42,6 +42,20 @@ object Dtcs {
         DESCRIPTIONS[code] ?: "Fault code — look up $code"
 
     private val DESCRIPTIONS = mapOf(
+        "P0030" to "Oxygen sensor heater circuit fault (bank 1, sensor 1)",
+        "P0031" to "Oxygen sensor heater control circuit low (bank 1, sensor 1)",
+        "P0032" to "Oxygen sensor heater control circuit high (bank 1, sensor 1)",
+        "P0036" to "Oxygen sensor heater circuit fault (bank 1, sensor 2)",
+        "P0037" to "Oxygen sensor heater control circuit low (bank 1, sensor 2)",
+        "P0038" to "Oxygen sensor heater control circuit high (bank 1, sensor 2)",
+        "P0043" to "Oxygen sensor heater control circuit low (bank 1, sensor 3)",
+        "P0044" to "Oxygen sensor heater control circuit high (bank 1, sensor 3)",
+        "P0050" to "Oxygen sensor heater circuit fault (bank 2, sensor 1)",
+        "P0051" to "Oxygen sensor heater control circuit low (bank 2, sensor 1)",
+        "P0052" to "Oxygen sensor heater control circuit high (bank 2, sensor 1)",
+        "P0056" to "Oxygen sensor heater circuit fault (bank 2, sensor 2)",
+        "P0057" to "Oxygen sensor heater control circuit low (bank 2, sensor 2)",
+        "P0058" to "Oxygen sensor heater control circuit high (bank 2, sensor 2)",
         "P0101" to "Mass air flow sensor range/performance problem",
         "P0113" to "Intake air temperature sensor reading too high",
         "P0118" to "Coolant temperature sensor reading too high",
