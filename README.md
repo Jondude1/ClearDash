@@ -30,6 +30,9 @@ An Android Auto dashboard for the CX-5 that pulls everything into one screen:
   charging flows, cylinders flashing in firing order, plus estimated horsepower, load, throttle and fuel burn
 - **Ambient mode**: parked for 90 s, the dash eases into a slow screensaver — the hologram turning centre
   stage, breathing systems readouts, the clock and what's playing. Any knob turn wakes it
+- **Idle diagnostics sweep**: stopped for 8 s (a red light, a drive-through), a scan line passes over the
+  hologram once and reports "all systems nominal" — or the one thing worth knowing (running hot, charging low,
+  fuel low, idle high, or an engineering note)
 - **Engineering notes**: ClearDash learns what's normal for your car (fuel trims, idle drift, charging
   voltage, warm-up time, temperatures, mpg by cruising speed) and turns it into plain-English suggestions
   on the phone, in the car's ⌘ menu, and for ATLAS

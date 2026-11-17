@@ -163,6 +163,9 @@ object Tuning {
         driveSec = 0f; startCool = null; startIntake = null; warmDone = false
     }
 
+    /** This car's learned normal warm idle, once known. */
+    val idleBaseline: Int? get() { synchronized(this) { load(); return if (idleBase.n >= 600) idleBase.avg.roundToInt() else null } }
+
     /** Minutes of engine data learned so far. */
     val learnedMinutes: Int get() { synchronized(this) { load(); return (engineSec / 60).toInt() } }
 

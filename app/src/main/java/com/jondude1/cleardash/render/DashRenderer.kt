@@ -116,6 +116,15 @@ class DashRenderer {
     private var lastFrame = 0L
     private var frameDt = 0f
 
+    // idle diagnostics sweep
+    private var stopSince = 0L
+    private var sweptThisStop = false
+    private var sweepStart = 0L
+    private var diagTitle = ""
+    private var diagSub = ""
+    private var diagWarn = false
+    private var holoShown = false
+
     // ambient (parked) mode
     private var stillSince = 0L
     private var ambientA = 0f
@@ -191,6 +200,18 @@ class DashRenderer {
             return
         }
 
+        // Stopped for a few seconds (a red light, a drive-through): one quiet diagnostic sweep.
+        if (spd == null || spd > 3f) { stopSince = 0L; sweptThisStop = false }
+        else if (spd < 1f) {
+            if (stopSince == 0L) stopSince = now
+            if (!sweptThisStop && now - stopSince > SWEEP_AFTER_MS && ie > INTRO_MS) {
+                sweptThisStop = true
+                sweepStart = now
+                runDiagnostics(s)
+            }
+        }
+        holoShown = false
+
         val stripH = 9f * u
         drawTopStrip(c, RectF(area.left, area.top, area.right, area.top + stripH), s, mode, knobHint)
         val body = RectF(area.left, area.top + stripH, area.right, area.bottom)
@@ -213,6 +234,9 @@ class DashRenderer {
             stroke.color = pal.CYAN_DIM
             c.drawLine(body.left, y, body.right, y, stroke)
         }
+
+        val se = now - sweepStart
+        if (sweepStart > 0 && se < SWEEP_SCAN_MS + SWEEP_HOLD_MS && !holoShown) drawDiagBar(c, body, se)
 
         if (ambientA > 0.001f) {
             val l = c.saveLayerAlpha(area, (255 * ambientA).toInt())
@@ -539,6 +563,10 @@ class DashRenderer {
         val carBox = RectF(b.left + colW, b.top + 3.5f * u, b.right, b.bottom - 4f * u)
         holoCar.update(s)
         holoCar.draw(c, carBox, u, pal)
+        holoShown = true
+        val se = System.currentTimeMillis() - sweepStart
+        val sweeping = sweepStart > 0 && se < SWEEP_SCAN_MS + SWEEP_HOLD_MS
+        if (sweeping && se < SWEEP_SCAN_MS) drawSweepLine(c, carBox, se / SWEEP_SCAN_MS.toFloat())
 
         val hdg = s.bearing
         val dirs = arrayOf("N", "NE", "E", "SE", "S", "SW", "W", "NW")
@@ -560,7 +588,15 @@ class DashRenderer {
             label(c, v, b.left, y + 4.2f * u, col, 3.2f, bold = true, maxW = colW - 1f * u)
             y += step
         }
-        label(c, "NO ACTIVE ROUTE · START ONE IN GOOGLE MAPS", b.left, b.bottom - 0.6f * u, pal.MUTED, 2.4f, maxW = b.width())
+        if (sweeping) {
+            val a = sweepFade(se)
+            if (se < SWEEP_SCAN_MS) label(c, "DIAGNOSTIC SWEEP · %d%%".format((se * 100 / SWEEP_SCAN_MS).toInt()), b.left, b.bottom - 0.6f * u,
+                withAlpha(pal.CYAN, (255 * a).toInt()), 2.5f, bold = true, maxW = b.width())
+            else label(c, diagTitle + if (diagSub.isNotEmpty()) " · $diagSub" else "", b.left, b.bottom - 0.6f * u,
+                withAlpha(if (diagWarn) pal.ORANGE else pal.CYAN, (255 * a).toInt()), 2.5f, bold = true, maxW = b.width())
+        } else {
+            label(c, "NO ACTIVE ROUTE · START ONE IN GOOGLE MAPS", b.left, b.bottom - 0.6f * u, pal.MUTED, 2.4f, maxW = b.width())
+        }
     }
 
     private fun drawMedia(c: Canvas, b: RectF, m: MediaInfo) {
@@ -1119,6 +1155,89 @@ class DashRenderer {
         stroke.strokeCap = Paint.Cap.BUTT
     }
 
+    // ───────────────────────── DIAGNOSTIC SWEEP ─────────────────────────
+
+    /** Picks the one thing worth knowing right now, or "all systems nominal". */
+    private fun runDiagnostics(s: VehicleState) {
+        val o = s.obd
+        diagWarn = false
+        diagSub = ""
+        if (!o.connected) {
+            diagTitle = "VEHICLE LINK OFFLINE"
+            diagSub = listOfNotNull(if (s.gpsOk) "GPS OK" else null, if (s.media != null) "AUDIO OK" else null).joinToString(" · ")
+            return
+        }
+        val cool = o.coolantF
+        val volt = o.voltage
+        val fuel = o.fuelPct
+        val rpm = o.rpm
+        val base = try { com.jondude1.cleardash.data.Tuning.idleBaseline } catch (_: Exception) { null }
+        val note = try { com.jondude1.cleardash.data.Tuning.tips().firstOrNull { it.level == 2 } } catch (_: Exception) { null }
+        when {
+            cool != null && cool >= 225f -> { diagWarn = true; diagTitle = "COOLANT ${cool.roundToInt()}°F · RUNNING HOT" }
+            volt != null && rpm != null && rpm > 500 && volt < 13.0f -> { diagWarn = true; diagTitle = "CHARGING LOW · %.1f V".format(volt) }
+            fuel != null && fuel <= 15 -> { diagWarn = true; diagTitle = "FUEL $fuel% · ≈ %.1f GAL LEFT".format(Prefs.tankGal * fuel / 100f) }
+            rpm != null && base != null && cool != null && cool > 170f && rpm > base + 250 -> { diagWarn = true; diagTitle = "IDLE HIGH · %,d RPM (NORMAL %,d)".format(rpm, base) }
+            note != null -> { diagWarn = true; diagTitle = "NOTE: " + note.title.uppercase() }
+            cool != null && cool < 160f -> diagTitle = "ENGINE WARMING · ${cool.roundToInt()}°F"
+            else -> diagTitle = "ALL SYSTEMS NOMINAL"
+        }
+        if (!diagWarn) diagSub = listOfNotNull(
+            cool?.let { "${it.roundToInt()}°F" }, volt?.let { "%.1f V".format(it) }, fuel?.let { "FUEL $it%" },
+        ).joinToString(" · ")
+    }
+
+    private fun sweepFade(se: Long): Float {
+        val end = SWEEP_SCAN_MS + SWEEP_HOLD_MS
+        return when {
+            se < 300 -> se / 300f
+            se > end - 600 -> ((end - se) / 600f).coerceIn(0f, 1f)
+            else -> 1f
+        }
+    }
+
+    /** A bright vertical line wiping across [box] with a fading trail and tick marks. */
+    private fun drawSweepLine(c: Canvas, box: RectF, t: Float) {
+        val x = box.left + box.width() * t
+        val trail = box.width() * 0.18f
+        fill.shader = LinearGradient(x - trail, 0f, x, 0f, withAlpha(pal.CYAN, 0), withAlpha(pal.CYAN, 60), Shader.TileMode.CLAMP)
+        c.drawRect(max(box.left, x - trail), box.top, x, box.bottom, fill)
+        fill.shader = null
+        stroke.shader = null
+        stroke.strokeCap = Paint.Cap.BUTT
+        stroke.strokeWidth = 0.4f * u
+        stroke.color = pal.CYAN
+        c.drawLine(x, box.top, x, box.bottom, stroke)
+        stroke.strokeWidth = 0.25f * u
+        var y = box.top
+        while (y < box.bottom) { c.drawLine(x - 1.2f * u, y, x + 1.2f * u, y, stroke); y += 4f * u }
+    }
+
+    /** The sweep for views without the hologram: a slim glass bar along the bottom. */
+    private fun drawDiagBar(c: Canvas, body: RectF, se: Long) {
+        val a = sweepFade(se)
+        val w = min(body.width() * 0.62f, 110f * u)
+        val h = 8f * u
+        val b = RectF(body.centerX() - w / 2, body.bottom - 3f * u - h, body.centerX() + w / 2, body.bottom - 3f * u)
+        val l = c.saveLayerAlpha(b.left - u, b.top - u, b.right + u, b.bottom + u, (255 * a).toInt())
+        fill.shader = null
+        fill.color = withAlpha(pal.GROUND, 235)
+        c.drawRect(b, fill)
+        val col = if (se >= SWEEP_SCAN_MS && diagWarn) pal.ORANGE else pal.CYAN
+        brackets(c, b, 1.8f * u, 0.4f * u, col)
+        if (se < SWEEP_SCAN_MS) {
+            val t = se / SWEEP_SCAN_MS.toFloat()
+            fill.color = withAlpha(pal.CYAN, 34)
+            c.drawRect(b.left, b.top, b.left + b.width() * t, b.bottom, fill)
+            drawSweepLine(c, b, t)
+            label(c, "DIAGNOSTIC SWEEP · %d%%".format((t * 100).toInt()), b.centerX(), b.centerY() + 1f * u, pal.TEXT, 2.7f, bold = true, center = true)
+        } else {
+            val line = diagTitle + if (diagSub.isNotEmpty()) "  ·  $diagSub" else ""
+            label(c, line, b.centerX(), b.centerY() + 1f * u, if (diagWarn) pal.ORANGE else pal.TEXT, 2.7f, bold = true, center = true, maxW = b.width() - 5f * u)
+        }
+        c.restoreToCount(l)
+    }
+
     // ───────────────────────── AMBIENT ─────────────────────────
 
     /**
@@ -1605,5 +1724,8 @@ class DashRenderer {
         const val SHUTDOWN_DOT_MS = 1600
         const val SHUTDOWN_MS = 2700
         const val AMBIENT_DELAY_MS = 90_000L
+        const val SWEEP_AFTER_MS = 8_000L
+        const val SWEEP_SCAN_MS = 2_200L
+        const val SWEEP_HOLD_MS = 6_000L
     }
 }
