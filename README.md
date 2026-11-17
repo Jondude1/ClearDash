@@ -25,6 +25,14 @@ An Android Auto dashboard for the CX-5 that pulls everything into one screen:
 - **Look**: the ATLAS "Stark" hologram — cyan light on near-black teal glass, cut-corner panels with corner
   brackets, a reactor-ring speedometer, Space Mono readouts and Sora text — laid out for the CX-5's 800×480 screen
   and driven entirely from the commander knob
+- **POWER view**: a live top-down powertrain schematic — energy pulses from the engine through the
+  transmission to the wheels (and the rear axle when i-Activ AWD engages), fuel, intake air, exhaust and
+  charging flows, cylinders flashing in firing order, plus estimated horsepower, load, throttle and fuel burn
+- **Ambient mode**: parked for 90 s, the dash eases into a slow screensaver — the hologram turning centre
+  stage, breathing systems readouts, the clock and what's playing. Any knob turn wakes it
+- **Engineering notes**: ClearDash learns what's normal for your car (fuel trims, idle drift, charging
+  voltage, warm-up time, temperatures, mpg by cruising speed) and turns it into plain-English suggestions
+  on the phone, in the car's ⌘ menu, and for ATLAS
 
 Built by GitHub Actions on every push to `main` and published as a GitHub Release.
 The app checks for new releases and updates itself.

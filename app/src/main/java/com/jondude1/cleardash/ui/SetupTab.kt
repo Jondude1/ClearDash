@@ -113,6 +113,7 @@ fun SetupTab() {
         KnobCard()
         NavigationCard()
         NightModeCard()
+        DashboardCard()
         AtlasLinkCard()
         CalloutsCard()
         VehicleCard(prefsVersion)
@@ -233,6 +234,15 @@ private fun NightModeCard() {
             }
         }
         Hint("Auto follows the CX-5's own night signal (headlights on), the same switch that dims Android Auto. The phone preview follows sunset.")
+    }
+}
+
+@Composable
+private fun DashboardCard() {
+    @Suppress("UNUSED_VARIABLE") val pv by Prefs.version.collectAsState()
+    SectionCard("Dashboard", "Ambient mode and the POWER view") {
+        ToggleRow("Ambient mode", "Parked for 90 s, the dash eases into a slow screensaver. Any knob turn wakes it.", Prefs.ambient) { Prefs.ambient = it }
+        ToggleRow("AWD", "Show the i-Activ rear driveline on the POWER view (turn off for a front-drive CX-5)", Prefs.awd) { Prefs.awd = it }
     }
 }
 

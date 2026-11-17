@@ -44,6 +44,10 @@ data class ObdData(
     val fuelPct: Int? = null,
     val stft: Float? = null,
     val ltft: Float? = null,
+    /** Throttle position, % (PID 11). */
+    val throttle: Int? = null,
+    /** Mass air flow, grams/second (PID 10). */
+    val maf: Float? = null,
     val dtcs: List<Dtc> = emptyList(),
 )
 

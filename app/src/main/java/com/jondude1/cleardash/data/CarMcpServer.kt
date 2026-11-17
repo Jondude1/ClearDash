@@ -241,6 +241,7 @@ object CarTools {
         .put(tool("mark_spot", "Save the car's current location with a short note (e.g. 'good parking', 'pothole', 'fishing spot').",
             JSONObject().put("note", JSONObject().put("type", "string").put("description", "Short label for the spot"))))
         .put(tool("list_spots", "Places saved with mark_spot or from the car's quick actions, newest first, with Google Maps links."))
+        .put(tool("engineering_notes", "What ClearDash has learned about this particular CX-5 from its engine data over time (fuel trims, idle drift, charging voltage, warm-up time, temperatures, most efficient cruising speed) as plain-English suggestions. Use for 'how's the car holding up', 'anything I should fix', 'what speed is most efficient'."))
         .put(tool("callouts", "ClearDash's spoken car callouts (speed-limit changes, low fuel, break reminders): mute or unmute them for the rest of this drive, repeat the last one, or check their status.",
             JSONObject().put("action", enumProp("What to do", "mute", "unmute", "repeat", "status")), listOf("action")))
 
@@ -268,6 +269,8 @@ object CarTools {
             "list_spots" -> Trips.spots().let { l ->
                 (if (l.isEmpty()) "No saved spots." else l.joinToString("\n") { "• ${it.note} — ${it.whenText()} — ${it.mapsUrl()}" }) to false
             }
+            "engineering_notes" -> ("Learned from ${Tuning.learnedMinutes} min of engine data:\n" +
+                Tuning.tips().joinToString("\n") { "• ${it.title}: ${it.detail}" }) to false
             "callouts" -> when (a.optString("action")) {
                 "mute" -> { Callouts.mutedThisDrive = true; "Callouts muted for the rest of this drive." to false }
                 "unmute" -> { Callouts.mutedThisDrive = false; "Callouts back on." to false }
@@ -298,6 +301,8 @@ object CarTools {
             o.coolantF?.let { "coolant ${it.roundToInt()}°F" },
             o.voltage?.let { "battery %.1f V".format(it) },
             o.load?.let { "engine load $it%" },
+            o.throttle?.let { "throttle $it%" },
+            o.maf?.let { "air flow %.1f g/s (≈ %.0f hp)".format(it, it * 1.32f) },
             o.intakeF?.let { "intake air ${it.roundToInt()}°F" },
             o.fuelPct?.let { "fuel $it% (about %.1f gallons of %.1f)".format(Prefs.tankGal * it / 100f, Prefs.tankGal) },
         ).joinToString(", ").ifEmpty { "Adapter connected; waiting for readings." }.replaceFirstChar { it.uppercase() } + "."

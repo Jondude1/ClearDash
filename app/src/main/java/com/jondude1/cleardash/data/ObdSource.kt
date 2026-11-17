@@ -250,6 +250,12 @@ class ObdSource(private val context: Context) {
             if (failures >= 6) throw IOException("no response")
             o = o.copy(rpm = rpm ?: o.rpm, speedMph = spdKmh?.let { Math.round(it * 0.621371f) } ?: o.speedMph)
 
+            if (tick % 2 == 0) {
+                o = o.copy(
+                    throttle = pid(link.send("0111"), "11")?.let { it[0] * 100 / 255 } ?: o.throttle,
+                    maf = pid(link.send("0110"), "10")?.takeIf { it.size >= 2 }?.let { (it[0] * 256 + it[1]) / 100f } ?: o.maf,
+                )
+            }
             if (tick % 5 == 0) {
                 o = o.copy(
                     coolantF = pid(link.send("0105"), "05")?.let { cToF(it[0] - 40f) } ?: o.coolantF,

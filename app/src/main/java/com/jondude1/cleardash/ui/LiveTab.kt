@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.Alignment
 import com.jondude1.cleardash.data.TripSummary
 import com.jondude1.cleardash.data.Trips
+import com.jondude1.cleardash.data.Tuning
 import com.jondude1.cleardash.data.Sun
 import com.jondude1.cleardash.data.Prefs
 import android.graphics.RectF
@@ -73,7 +74,7 @@ fun LiveTab() {
                 .aspectRatio(5f / 3f) // CX-5 screen: 800×480
                 .clipToBounds()
                 .border(1.dp, C.edge.copy(alpha = 0.45f))
-                .clickableNoRipple { mode = DashMode.entries[(mode.ordinal + 1) % DashMode.entries.size] }
+                .clickableNoRipple { if (!renderer.wake()) mode = DashMode.entries[(mode.ordinal + 1) % DashMode.entries.size] }
         ) {
             tick.let { } // redraw every frame for smooth needle motion
             renderer.night = when (Prefs.nightMode) {
@@ -91,7 +92,7 @@ fun LiveTab() {
                 .padding(16.dp, 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Segmented(listOf("Drive", "Systems"), mode.ordinal) { mode = DashMode.entries[it] }
+            Segmented(listOf("Drive", "Route", "Power", "Systems"), mode.ordinal) { renderer.wake(); mode = DashMode.entries[it] }
             Text("LIVE · SAME AS YOUR CX-5", color = C.muted, fontFamily = HoloMono, fontSize = 11.sp, letterSpacing = 1.2.sp, modifier = Modifier.padding(top = 8.dp))
         }
 
@@ -119,6 +120,7 @@ fun LiveTab() {
         }
 
         TripCard()
+        TuningCard()
         PlacesCard()
 
         SectionCard("Sources") {
@@ -161,6 +163,29 @@ private fun TripCard() {
             }
         }
         Hint("Saved when the car disconnects. ATLAS gets a copy too.")
+    }
+}
+
+/** What ClearDash has learned about this particular car, as engineering notes. */
+@Composable
+private fun TuningCard() {
+    var version by remember { mutableIntStateOf(0) }
+    val tips = remember(version) { Tuning.tips() }
+    var confirm by remember { mutableStateOf(false) }
+    SectionCard("Engineering notes", "Learned from ${Tuning.learnedMinutes} min of engine data") {
+        tips.forEach { t ->
+            Column {
+                Text(t.title, color = when (t.level) { 2 -> C.amber; 1 -> C.cyan; else -> C.green }, fontWeight = FontWeight.Medium, fontSize = 15.sp)
+                Text(t.detail, color = C.text, fontSize = 14.sp)
+            }
+        }
+        Hint("Suggestions with the numbers behind them, not a diagnosis. ClearDash only reads from the car.")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Pill("Refresh") { version++ }
+            Pill(if (confirm) "Tap again to reset" else "Reset baseline", C.muted) {
+                if (confirm) { Tuning.reset(); confirm = false; version++ } else confirm = true
+            }
+        }
     }
 }
 

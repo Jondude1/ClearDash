@@ -42,6 +42,7 @@ import kotlin.math.ln
  *    media buttons (back · play/pause · forward); press the knob to select.
  *  • Select the "move" button, then simply turn the knob to flip between views.
  *  • Parked, tapping the screen also flips views.
+ *  • Parked for a while, it eases into a slow ambient screensaver; any turn or tap wakes it.
  */
 class DashScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback, DefaultLifecycleObserver {
     private val renderer = DashRenderer()
@@ -151,6 +152,7 @@ class DashScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback, DefaultLifecyc
         val now = SystemClock.elapsedRealtime()
         if (now - lastStep < 280) return
         lastStep = now
+        if (renderer.wake()) return // first turn just wakes the parked screensaver
         val modes = DashMode.entries
         currentMode = modes[(currentMode.ordinal + dir + modes.size) % modes.size]
     }

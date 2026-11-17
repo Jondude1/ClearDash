@@ -26,6 +26,7 @@ import com.jondude1.cleardash.data.Callouts
 import com.jondude1.cleardash.data.Spot
 import com.jondude1.cleardash.data.TripSummary
 import com.jondude1.cleardash.data.Trips
+import com.jondude1.cleardash.data.Tuning
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -74,6 +75,7 @@ class QuickScreen(ctx: CarContext) : Screen(ctx) {
         add("Repeat", "Last callout", R.drawable.ic_q_repeat) {
             if (!Callouts.repeatLast()) CarToast.makeText(carContext, "Nothing said yet this drive", CarToast.LENGTH_SHORT).show()
         }
+        add("Tuning", "Engineering notes", R.drawable.ic_q_tune) { sm.push(TuningScreen(carContext)) }
         val muted = Callouts.mutedThisDrive
         add(if (muted) "Unmute" else "Mute", if (muted) "Callouts are off" else "Callouts this drive", if (muted) R.drawable.ic_q_voice else R.drawable.ic_q_mute) {
             Callouts.mutedThisDrive = !Callouts.mutedThisDrive
@@ -85,6 +87,22 @@ class QuickScreen(ctx: CarContext) : Screen(ctx) {
             .setHeaderAction(Action.BACK)
             .setSingleList(items.build())
             .build()
+    }
+}
+
+/** What ClearDash has learned about the car, worth-a-look notes first. */
+class TuningScreen(ctx: CarContext) : Screen(ctx) {
+    override fun onGetTemplate(): Template {
+        val list = ItemList.Builder()
+        Tuning.tips().take(6).forEach { t ->
+            list.addItem(
+                Row.Builder().setTitle(t.title).addText(t.detail)
+                    .setImage(carContext.icon(R.drawable.ic_q_tune, if (t.level == 2) CarColor.YELLOW else HOLO))
+                    .build()
+            )
+        }
+        return ListTemplate.Builder().setTitle("Engineering notes · ${Tuning.learnedMinutes} min learned")
+            .setHeaderAction(Action.BACK).setSingleList(list.build()).build()
     }
 }
 

@@ -141,6 +141,7 @@ object Trips {
 
     private fun tick(s: VehicleState, dt: Float) {
         val t = _live.value ?: return
+        Tuning.sample(s, dt)
         val spd = s.bestSpeed ?: 0f
         val moving = spd > 2f
         var dist = t.distanceMi
@@ -168,6 +169,7 @@ object Trips {
     @Synchronized
     fun finish(ctx: Context): TripSummary? {
         job?.cancel(); job = null
+        Tuning.endDrive()
         val t = _live.value ?: return null
         _live.value = null
         val s = DataHub.state.value

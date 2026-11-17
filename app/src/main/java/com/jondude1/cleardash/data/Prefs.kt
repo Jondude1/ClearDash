@@ -93,6 +93,9 @@ object Prefs {
     var placeNamesJson: String
         get() = sp.getString("place_names", "{}") ?: "{}"
         set(v) { sp.edit().putString("place_names", v).apply() }
+    var tuningJson: String
+        get() = sp.getString("tuning", "{}") ?: "{}"
+        set(v) { sp.edit().putString("tuning", v).apply() }
     var parkedJson: String
         get() = sp.getString("parked", "") ?: ""
         set(v) { sp.edit().putString("parked", v).apply() }
@@ -142,6 +145,15 @@ object Prefs {
     var nightMode: Int
         get() = sp.getInt("night_mode", 1)
         set(v) = edit { putInt("night_mode", v) }
+
+    /** Parked with the engine on, the dashboard eases into a slow screensaver. */
+    var ambient: Boolean
+        get() = sp.getBoolean("ambient", true)
+        set(v) = edit { putBoolean("ambient", v) }
+    /** i-Activ AWD: shows the rear driveline on the POWER view. */
+    var awd: Boolean
+        get() = sp.getBoolean("awd", true)
+        set(v) = edit { putBoolean("awd", v) }
 
     // Navigation shortcuts
     var homeAddr: String

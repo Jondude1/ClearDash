@@ -25,14 +25,16 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /** The car screen's views, in knob order. */
-enum class DashMode(val title: String) { DASH("DRIVE"), ROUTE("ROUTE"), GAUGES("SYSTEMS") }
+enum class DashMode(val title: String) { DASH("DRIVE"), ROUTE("ROUTE"), POWER("POWER"), GAUGES("SYSTEMS") }
 
 /**
  * Draws every ClearDash view onto a plain Canvas. The Android Auto surface and the phone
@@ -111,6 +113,23 @@ class DashRenderer {
     private var lastMode: DashMode? = null
     private var modeChangedAt = 0L
     private var u = 1f // one layout unit ≈ 1% of the drawing height
+    private var lastFrame = 0L
+    private var frameDt = 0f
+
+    // ambient (parked) mode
+    private var stillSince = 0L
+    private var ambientA = 0f
+
+    /** True while the parked screensaver is showing. */
+    val ambientActive: Boolean get() = ambientA > 0.05f
+
+    /** Knob or tap while the screensaver shows: wake up without changing view. Returns true if it was showing. */
+    fun wake(): Boolean {
+        val was = ambientActive
+        stillSince = System.currentTimeMillis()
+        if (was) ambientA = 0f
+        return was
+    }
 
     /** Cut-out photo of a blue 2018 CX-5; drawn as a hologram in the boot sequence. */
     var carPhoto: Bitmap? = null
@@ -153,9 +172,23 @@ class DashRenderer {
         }
 
         val now = System.currentTimeMillis()
+        frameDt = if (lastFrame == 0L) 0f else ((now - lastFrame) / 1000f).coerceIn(0f, 0.2f)
+        lastFrame = now
         if (mode != lastMode) {
             if (lastMode != null) modeChangedAt = now
             lastMode = mode
+            stillSince = now
+        }
+
+        // Parked with the engine on (or just sitting still) for a while: ease into ambient mode.
+        val spd = s.bestSpeed
+        val still = Prefs.ambient && spd != null && spd < 1f && s.nav == null && s.activeAlerts.isEmpty()
+        if (!still) stillSince = now
+        val want = still && now - stillSince > AMBIENT_DELAY_MS
+        ambientA = if (want) min(1f, ambientA + frameDt / 2.5f) else max(0f, ambientA - frameDt / 0.25f)
+        if (ambientA >= 0.999f) {
+            drawAmbient(c, area, s, 1f)
+            return
         }
 
         val stripH = 9f * u
@@ -168,6 +201,7 @@ class DashRenderer {
         when (mode) {
             DashMode.DASH -> drawDrive(c, body, s)
             DashMode.ROUTE -> drawRoute(c, body, s)
+            DashMode.POWER -> drawPower(c, body, s)
             DashMode.GAUGES -> drawSystems(c, body, s)
         }
         if (save >= 0) {
@@ -178,6 +212,13 @@ class DashRenderer {
             stroke.strokeWidth = 0.5f * u
             stroke.color = pal.CYAN_DIM
             c.drawLine(body.left, y, body.right, y, stroke)
+        }
+
+        if (ambientA > 0.001f) {
+            val l = c.saveLayerAlpha(area, (255 * ambientA).toInt())
+            drawGround(c, fullW.toFloat(), fullH.toFloat())
+            drawAmbient(c, area, s, ambientA)
+            c.restoreToCount(l)
         }
 
         // the boot sequence dissolves into the dashboard
@@ -228,13 +269,13 @@ class DashRenderer {
         } else {
             for (m in DashMode.entries) {
                 val on = m == mode
-                label(c, m.title, x, y, if (on) pal.TEXT else pal.MUTED, 3.0f, bold = on)
-                val w = textW(m.title, 3.0f, bold = on)
+                label(c, m.title, x, y, if (on) pal.TEXT else pal.MUTED, 2.7f, bold = on)
+                val w = textW(m.title, 2.7f, bold = on)
                 if (on) {
                     r.set(x - 1.4f * u, b.top + 1.4f * u, x + w + 0.6f * u, b.bottom - 1.0f * u)
                     brackets(c, r, 1.6f * u, 0.3f * u, pal.CYAN)
                 }
-                x += w + 5f * u
+                x += w + 4f * u
             }
         }
 
@@ -826,6 +867,346 @@ class DashRenderer {
         if (live && g.sub != null) label(c, g.sub, cx, cy + rad * 0.66f + 3.8f * u, pal.TEXT2, 2.5f, center = true)
     }
 
+    // ───────────────────────── POWER ─────────────────────────
+
+    private val flowPhase = FloatArray(16)
+    private var cylPhase = 0f
+    private var wheelPhase = 0f
+    private var hpShown = 0f
+
+    /**
+     * Live power-flow schematic: the CX-5 seen from above, nose right. Energy pulses travel
+     * from the engine through the transmission to the wheels (and the rear axle when i-Activ
+     * AWD sends torque back), fuel runs forward from the tank, exhaust flows out the back,
+     * and the four cylinders flash in firing order. Brightness follows engine load, pulse
+     * speed follows the road and the revs.
+     */
+    private fun drawPower(c: Canvas, a: RectF, s: VehicleState) {
+        val o = s.obd
+        val live = o.connected && o.rpm != null
+        val rpm = if (live) (o.rpm ?: 0).toFloat() else 0f
+        val load = if (live) (o.load ?: 0) / 100f else 0f
+        val thr = if (live) (o.throttle ?: 0) / 100f else 0f
+        val maf = if (live) o.maf else null
+        val mph = s.bestSpeed ?: 0f
+
+        // estimated power: from mass air flow when the car reports it, else load × revs
+        val hp = when {
+            !live -> 0f
+            maf != null -> maf * 1.32f
+            else -> 187f * load * min(1f, rpm / 6000f)
+        }.coerceIn(0f, 230f)
+        hpShown += (hp - hpShown) * min(1f, frameDt * 6f)
+
+        val p = 4.5f * u
+        val inner = RectF(a.left + p, a.top + 2f * u, a.right - p, a.bottom - p)
+        val colW = min(46f * u, inner.width() * 0.32f)
+        val sch = RectF(inner.left, inner.top, inner.right - colW - p, inner.bottom)
+        holoPanel(c, sch)
+        tickHeader(c, "POWERTRAIN // " + if (live) "LIVE" else "STANDBY", sch.left + 3.5f * u, sch.top + 5f * u)
+        if (Prefs.awd) label(c, "i-ACTIV AWD", sch.right - 3.5f * u, sch.top + 5f * u, pal.MUTED, 2.4f, right = true)
+
+        // car geometry: L along the car, W across; fx 0 = rear bumper, 1 = nose; fy -0.5..0.5
+        val area = RectF(sch.left + 5f * u, sch.top + 10f * u, sch.right - 5f * u, sch.bottom - 9f * u)
+        val L = min(area.width(), area.height() / 0.44f * 0.98f)
+        val W = L * 0.42f
+        val ox = area.centerX() - L / 2
+        val oy = area.centerY()
+        fun X(fx: Float) = ox + fx * L
+        fun Y(fy: Float) = oy + fy * W
+
+        // body
+        stroke.shader = null
+        stroke.strokeCap = Paint.Cap.ROUND
+        stroke.strokeWidth = 0.35f * u
+        stroke.color = pal.CYAN_DIM
+        r.set(X(0f), Y(-0.5f), X(1f), Y(0.5f))
+        c.drawRoundRect(r, 0.06f * L, 0.32f * W, stroke)
+        stroke.strokeWidth = 0.22f * u
+        stroke.color = pal.CYAN_FAINT
+        r.set(X(0.13f), Y(-0.40f), X(0.66f), Y(0.40f))     // glasshouse
+        c.drawRoundRect(r, 0.03f * L, 0.12f * W, stroke)
+        c.drawLine(X(0.60f), Y(-0.40f), X(0.60f), Y(0.40f), stroke)   // windshield header
+        c.drawLine(X(0.19f), Y(-0.40f), X(0.19f), Y(0.40f), stroke)   // rear glass
+        for (sg in floatArrayOf(-1f, 1f)) {                            // mirrors
+            c.drawLine(X(0.66f), Y(0.49f * sg), X(0.62f), Y(0.58f * sg), stroke)
+            c.drawLine(X(0.62f), Y(0.58f * sg), X(0.60f), Y(0.50f * sg), stroke)
+        }
+
+        val glowA = (60 + 195 * (0.25f + 0.75f * load)).toInt()
+        val power = withAlpha(pal.CYAN, if (live) glowA else 70)
+        val fuelCol = pal.TEXT2
+        val exhCol = pal.MUTED
+
+        // flow speeds (px/s)
+        val roadV = L * (0.08f + 0.9f * min(mph, 90f) / 90f)
+        val revV = L * (0.05f + 0.45f * rpm / 6500f)
+        val fuelV = L * (0.04f + 0.30f * min(1f, (maf ?: (rpm / 6500f * 40f)) / 60f))
+        val pwrI = if (live) 0.3f + 0.7f * load else 0.12f
+        val rearShare = when {
+            !Prefs.awd -> 0f
+            !live -> 0.1f
+            mph < 20f && thr > 0.3f -> 0.85f
+            thr > 0.6f -> 0.7f
+            else -> 0.18f
+        }
+
+        // fuel: tank → engine
+        fill.color = withAlpha(fuelCol, 30)
+        r.set(X(0.28f), Y(-0.36f), X(0.44f), Y(-0.08f))
+        c.drawRoundRect(r, 0.8f * u, 0.8f * u, fill)
+        stroke.color = withAlpha(fuelCol, 120); stroke.strokeWidth = 0.25f * u
+        c.drawRoundRect(r, 0.8f * u, 0.8f * u, stroke)
+        o.fuelPct?.takeIf { live }?.let { f ->     // fuel level inside the tank
+            fill.color = withAlpha(fuelCol, 70)
+            c.drawRect(X(0.28f) + 0.5f * u, Y(-0.08f) - (Y(-0.08f) - Y(-0.36f)) * f / 100f + 0.5f * u, X(0.44f) - 0.5f * u, Y(-0.08f) - 0.5f * u, fill)
+        }
+        flow(c, 0, floatArrayOf(X(0.44f), Y(-0.30f), X(0.50f), Y(-0.42f), X(0.82f), Y(-0.42f), X(0.86f), Y(-0.34f)), fuelV, fuelCol, if (live) 0.35f + 0.5f * load else 0.1f, 0.5f * u)
+
+        // air: grille → engine
+        flow(c, 1, floatArrayOf(X(1.0f), Y(-0.22f), X(0.965f), Y(-0.22f), X(0.94f), Y(-0.16f)), revV * 0.8f, pal.TEXT, if (live) 0.25f + 0.6f * thr else 0.08f, 0.4f * u)
+
+        // exhaust: engine → centre tunnel → muffler → twin tips
+        flow(c, 2, floatArrayOf(X(0.845f), Y(0.0f), X(0.80f), Y(0.07f), X(0.14f), Y(0.07f)), revV, exhCol, if (live) 0.2f + 0.6f * load else 0.08f, 0.45f * u)
+        stroke.color = withAlpha(exhCol, 140); stroke.strokeWidth = 0.25f * u
+        r.set(X(0.05f), Y(-0.18f), X(0.14f), Y(0.18f))
+        c.drawRoundRect(r, 0.6f * u, 0.6f * u, stroke)
+        for (sg in floatArrayOf(-1f, 1f))
+            flow(c, 3 + (if (sg > 0) 1 else 0), floatArrayOf(X(0.05f), Y(0.12f * sg), X(0.0f), Y(0.30f * sg)), revV, exhCol, if (live) 0.2f + 0.6f * load else 0.08f, 0.45f * u)
+
+        // drive: crank → transmission → front differential → front wheels
+        flow(c, 5, floatArrayOf(X(0.89f), Y(0.08f), X(0.88f), Y(0.21f), X(0.80f), Y(0.21f)), roadV, pal.CYAN, pwrI, 0.7f * u)
+        flow(c, 6, floatArrayOf(X(0.79f), Y(0.21f), X(0.79f), Y(0.40f)), roadV, pal.CYAN, pwrI, 0.7f * u)
+        flow(c, 7, floatArrayOf(X(0.79f), Y(0.21f), X(0.79f), Y(-0.40f)), roadV, pal.CYAN, pwrI, 0.7f * u)
+        if (Prefs.awd) {
+            // rear: power take-off → prop shaft → rear differential → rear wheels
+            flow(c, 8, floatArrayOf(X(0.79f), Y(0.12f), X(0.74f), Y(0.0f), X(0.21f), Y(0.0f)), roadV, pal.CYAN, pwrI * rearShare, 0.6f * u)
+            flow(c, 9, floatArrayOf(X(0.20f), Y(0.0f), X(0.20f), Y(0.40f)), roadV, pal.CYAN, pwrI * rearShare, 0.6f * u)
+            flow(c, 10, floatArrayOf(X(0.20f), Y(0.0f), X(0.20f), Y(-0.40f)), roadV, pal.CYAN, pwrI * rearShare, 0.6f * u)
+            fill.color = withAlpha(pal.CYAN, (60 + 160 * rearShare * pwrI).toInt())
+            c.drawCircle(X(0.20f), Y(0f), 0.9f * u, fill)
+        }
+
+        // charging: alternator ↔ battery
+        val charging = live && (o.voltage ?: 0f) > 13.2f
+        fill.color = withAlpha(pal.TEXT2, 40)
+        r.set(X(0.94f), Y(0.16f), X(0.985f), Y(0.34f))
+        c.drawRect(r, fill)
+        stroke.color = pal.TEXT2; stroke.strokeWidth = 0.25f * u
+        c.drawRect(r, stroke)
+        val alt = floatArrayOf(X(0.935f), Y(0.06f), X(0.96f), Y(0.16f))
+        flow(c, 11, if (charging) alt else floatArrayOf(alt[2], alt[3], alt[0], alt[1]), L * 0.12f, pal.TEXT2, if (live) 0.6f else 0.1f, 0.4f * u)
+
+        // transmission + front diff
+        fill.color = withAlpha(pal.CYAN, 34)
+        r.set(X(0.835f), Y(0.12f), X(0.915f), Y(0.30f))
+        c.drawRect(r, fill)
+        stroke.color = pal.CYAN_DIM; c.drawRect(r, stroke)
+        fill.color = power
+        c.drawCircle(X(0.79f), Y(0.21f), 0.9f * u, fill)
+
+        // engine block with its four cylinders, firing 1-3-4-2
+        r.set(X(0.845f), Y(-0.34f), X(0.935f), Y(0.08f))
+        fill.color = withAlpha(pal.CYAN, if (live) (30 + 50 * load).toInt() else 20)
+        c.drawRect(r, fill)
+        stroke.color = pal.CYAN; stroke.strokeWidth = 0.3f * u
+        c.drawRect(r, stroke)
+        if (rpm > 0) cylPhase = (cylPhase + rpm / 1500f * frameDt) % 1f
+        val firing = if (rpm > 0) intArrayOf(0, 2, 3, 1)[(cylPhase * 4).toInt().coerceIn(0, 3)] else -1
+        val cr = min(0.04f * W, 0.022f * L)
+        for (k in 0 until 4) {
+            val cx = X(0.89f); val cy = Y(-0.28f + k * 0.10f)
+            if (k == firing) {
+                fill.shader = RadialGradient(cx, cy, cr * 3f, withAlpha(pal.CYAN, 160), withAlpha(pal.CYAN, 0), Shader.TileMode.CLAMP)
+                c.drawCircle(cx, cy, cr * 3f, fill); fill.shader = null
+                fill.color = pal.TEXT; c.drawCircle(cx, cy, cr, fill)
+            } else {
+                stroke.color = pal.CYAN_DIM; stroke.strokeWidth = 0.25f * u
+                c.drawCircle(cx, cy, cr, stroke)
+            }
+        }
+
+        // wheels, tread lines rolling with road speed
+        wheelPhase = (wheelPhase + mph / 30f * frameDt) % 1f
+        for (fx in floatArrayOf(0.20f, 0.79f)) for (sg in floatArrayOf(-1f, 1f)) {
+            r.set(X(fx - 0.065f), Y(0.44f * sg - 0.065f), X(fx + 0.065f), Y(0.44f * sg + 0.065f))
+            fill.color = pal.GROUND; c.drawRect(r, fill)
+            stroke.color = pal.CYAN; stroke.strokeWidth = 0.35f * u
+            c.drawRect(r, stroke)
+            stroke.color = pal.CYAN_DIM; stroke.strokeWidth = 0.2f * u
+            for (k in 0 until 3) {
+                val t = ((k / 3f + wheelPhase) % 1f)
+                val x = r.right - t * r.width()
+                c.drawLine(x, r.top + 0.4f * u, x, r.bottom - 0.4f * u, stroke)
+            }
+        }
+
+        // callouts outside the body
+        fun callout(text: String, fx: Float, fy: Float, ly: Float, col: Int) {
+            stroke.color = withAlpha(col, 110); stroke.strokeWidth = 0.18f * u
+            c.drawLine(X(fx), Y(fy), X(fx), Y(ly) + (if (ly < 0) 1.2f * u else -3.2f * u), stroke)
+            label(c, text, X(fx), Y(ly), col, 2.3f, center = true)
+        }
+        callout("SKYACTIV-G 2.5", 0.89f, -0.34f, -0.68f, pal.TEXT2)
+        callout("FUEL" + (o.fuelPct?.takeIf { live }?.let { " $it%" } ?: ""), 0.36f, -0.36f, -0.68f, pal.TEXT2)
+        callout("EXHAUST", 0.10f, 0.18f, 0.72f, pal.MUTED)
+        if (Prefs.awd) callout(if (rearShare > 0.5f) "REAR · ENGAGED" else "REAR · ON DEMAND", 0.47f, 0.0f, 0.72f, if (rearShare > 0.5f) pal.CYAN else pal.MUTED)
+        callout("12V" + (o.voltage?.takeIf { live }?.let { " %.1fV".format(it) } ?: ""), 0.962f, 0.34f, 0.72f, pal.TEXT2)
+
+        if (!live) label(c, "OBD OFFLINE · " + o.status.uppercase(), sch.centerX(), sch.bottom - 3f * u, pal.MUTED, 2.4f, center = true, maxW = sch.width() - 8f * u)
+
+        // ── readouts ──
+        val col = RectF(sch.right + p, inner.top, inner.right, inner.bottom)
+        holoPanel(c, col)
+        val cl = col.left + 3.5f * u
+        val cw = col.width() - 7f * u
+        tickHeader(c, "OUTPUT", cl, col.top + 5f * u)
+        val hpTxt = if (live) hpShown.roundToInt().toString() else "--"
+        text.typeface = monoBold
+        text.textAlign = Paint.Align.LEFT
+        text.textSize = fitSize(hpTxt, cw * 0.6f, 13f * u, 7f * u, monoBold)
+        text.color = if (live) pal.TEXT else pal.MUTED
+        val hb = col.top + 7f * u + text.textSize * 0.82f
+        c.drawText(hpTxt, cl, hb, text)
+        label(c, "HP EST.", cl + text.measureText(hpTxt) + 1.8f * u, hb, pal.CYAN, 2.5f, bold = true)
+
+        val gph = maf?.let { it / 14.7f / 2798.7f * 3600f }
+        val rows = listOf(
+            Triple("ENGINE", if (live) "%,d RPM".format(rpm.roundToInt()) else "--", rpm / 6500f),
+            Triple("LOAD", o.load?.takeIf { live }?.let { "$it%" } ?: "--", load),
+            Triple("THROTTLE", o.throttle?.takeIf { live }?.let { "$it%" } ?: "--", thr),
+            Triple("FUEL BURN", gph?.let { g -> if (mph > 3f) "%.0f MPG".format(mph / max(g, 0.05f)) else "%.2f GAL/H".format(g) } ?: "--",
+                min(1f, (gph ?: 0f) / 4f)),
+        )
+        var y = hb + 6.5f * u
+        val step = min(10.5f * u, (col.bottom - 3f * u - y) / rows.size)
+        for ((k, v, f) in rows) {
+            label(c, k, cl, y, pal.MUTED, 2.4f)
+            label(c, v, cl + cw, y, if (live) pal.TEXT else pal.MUTED, 2.8f, bold = true, right = true)
+            segBar(c, RectF(cl, y + 1.8f * u, cl + cw, y + 3.4f * u), 16, if (live) f else 0f)
+            y += step
+        }
+    }
+
+    /** Draws a line with pulses travelling along it. [id] keeps each flow's phase smooth as speeds change. */
+    private fun flow(c: Canvas, id: Int, p: FloatArray, speed: Float, color: Int, intensity: Float, width: Float) {
+        val n = p.size / 2
+        var total = 0f
+        for (i in 0 until n - 1) total += hypot(p[i * 2 + 2] - p[i * 2], p[i * 2 + 3] - p[i * 2 + 1])
+        if (total <= 0f) return
+        stroke.shader = null
+        stroke.strokeCap = Paint.Cap.ROUND
+        stroke.strokeWidth = width * 0.5f
+        stroke.color = withAlpha(color, (40 + 70 * intensity).toInt())
+        for (i in 0 until n - 1) c.drawLine(p[i * 2], p[i * 2 + 1], p[i * 2 + 2], p[i * 2 + 3], stroke)
+        if (intensity < 0.02f) return
+        val spacing = 4.5f * u
+        flowPhase[id] = (flowPhase[id] + speed * frameDt) % spacing
+        fill.shader = null
+        fill.color = withAlpha(color, (255 * intensity.coerceIn(0f, 1f)).toInt())
+        var d = flowPhase[id]
+        var seg = 0
+        var segStart = 0f
+        while (d < total && seg < n - 1) {
+            val sl = hypot(p[seg * 2 + 2] - p[seg * 2], p[seg * 2 + 3] - p[seg * 2 + 1])
+            if (d > segStart + sl) { segStart += sl; seg++; continue }
+            val t = if (sl > 0f) (d - segStart) / sl else 0f
+            val x = p[seg * 2] + (p[seg * 2 + 2] - p[seg * 2]) * t
+            val y = p[seg * 2 + 1] + (p[seg * 2 + 3] - p[seg * 2 + 1]) * t
+            c.drawCircle(x, y, width, fill)
+            d += spacing
+        }
+        stroke.strokeCap = Paint.Cap.BUTT
+    }
+
+    // ───────────────────────── AMBIENT ─────────────────────────
+
+    /**
+     * Parked screensaver: the CX-5 hologram slowly turning centre stage, a breathing ring
+     * under it, systems readouts fading in and out in turn, the clock, and what's playing.
+     */
+    private fun drawAmbient(c: Canvas, a: RectF, s: VehicleState, @Suppress("UNUSED_PARAMETER") alpha: Float) {
+        val tms = SystemClock.uptimeMillis()
+        val breath = 0.5f + 0.5f * sin(tms / 4000.0 * 2 * PI).toFloat()
+
+        // clock, top left
+        val now = Date()
+        val t = clock.format(now)
+        text.typeface = sansLight
+        text.textAlign = Paint.Align.LEFT
+        text.textSize = 15f * u
+        text.color = pal.TEXT
+        val cx0 = a.left + 6f * u
+        val cb = a.top + 6f * u + text.textSize * 0.8f
+        c.drawText(t, cx0, cb, text)
+        val tw = text.measureText(t)
+        label(c, ampm.format(now), cx0 + tw + 1.6f * u, cb, pal.CYAN, 3.2f, bold = true)
+        label(c, dateFmt.format(now).uppercase(), cx0, cb + 5.5f * u, pal.TEXT2, 2.8f)
+
+        // the car, centre stage, on a breathing projector ring
+        val carBox = RectF(a.left + a.width() * 0.20f, a.top + a.height() * 0.16f, a.right - a.width() * 0.20f, a.bottom - a.height() * 0.14f)
+        val ringY = carBox.bottom - carBox.height() * 0.10f
+        val rw = carBox.width() * (0.40f + 0.03f * breath)
+        stroke.shader = null
+        stroke.strokeWidth = 0.3f * u
+        for (k in 0 until 3) {
+            stroke.color = withAlpha(pal.CYAN, ((30 + 60 * breath) * (1f - k * 0.3f)).toInt())
+            val g = rw * (1f + k * 0.18f)
+            r.set(carBox.centerX() - g, ringY - g * 0.16f, carBox.centerX() + g, ringY + g * 0.16f)
+            c.drawOval(r, stroke)
+        }
+        holoCar.update(s)
+        holoCar.draw(c, carBox, u, pal)
+
+        // systems readouts taking turns to glow, around the car
+        val o = s.obd
+        val chips = ArrayList<Pair<String, String>>()
+        if (o.connected) {
+            o.fuelPct?.let { chips += "FUEL" to "$it%" }
+            o.coolantF?.let { chips += "COOLANT" to "${it.roundToInt()}°F" }
+            o.voltage?.let { chips += "BATTERY" to "%.1f V".format(it) }
+            o.rpm?.let { chips += "IDLE" to "%,d RPM".format(it) }
+        } else {
+            chips += "VEHICLE" to "STANDING BY"
+        }
+        chips += "SYSTEMS" to "NOMINAL"
+        val spots = listOf(0.08f to 0.42f, 0.08f to 0.66f, 0.92f to 0.30f, 0.92f to 0.54f, 0.92f to 0.78f)
+        chips.take(spots.size).forEachIndexed { i, (k, v) ->
+            val ph = ((tms / 1000.0 / 3.0 + i * 0.7) % chips.size)
+            val glow = (1.0 - abs(ph - chips.size / 2.0) / (chips.size / 2.0)).toFloat().coerceIn(0f, 1f)
+            val (fx, fy) = spots[i]
+            val x = a.left + a.width() * fx
+            val y = a.top + a.height() * fy
+            val right = fx > 0.5f
+            label(c, k, x, y, withAlpha(pal.MUTED, (110 + 145 * glow).toInt()), 2.4f, right = right)
+            label(c, v, x, y + 4.4f * u, withAlpha(pal.TEXT, (120 + 135 * glow).toInt()), 3.2f, bold = true, right = right)
+            stroke.color = withAlpha(pal.CYAN, (40 + 120 * glow).toInt()); stroke.strokeWidth = 0.25f * u
+            val lx = if (right) x - textW(v, 3.2f, true) - 2f * u else x + textW(v, 3.2f, true) + 2f * u
+            c.drawLine(lx, y + 3f * u, lx + (if (right) -3f else 3f) * u, y + 3f * u, stroke)
+        }
+
+        // now playing, bottom right
+        s.media?.let { m ->
+            val sz = 13f * u
+            val box = RectF(a.right - 6f * u - sz, a.bottom - 6f * u - sz, a.right - 6f * u, a.bottom - 6f * u)
+            val tx = box.left - 3f * u
+            val maxW = a.width() * 0.32f
+            text.typeface = sansSemi; text.textSize = 3.6f * u; text.color = pal.TEXT; text.textAlign = Paint.Align.RIGHT
+            c.drawText(fit(m.title.ifEmpty { m.appName }, maxW), tx, box.top + 5f * u, text)
+            text.typeface = sans; text.textSize = 2.9f * u; text.color = pal.TEXT2
+            c.drawText(fit(m.artist.ifEmpty { m.appName }, maxW), tx, box.top + 9.4f * u, text)
+            text.textAlign = Paint.Align.LEFT
+            label(c, if (m.playing) "▶ PLAYING" else "❚❚ PAUSED", tx, box.bottom, pal.CYAN_DIM, 2.3f, right = true)
+            val art = m.art
+            if (art != null) { c.save(); c.clipRect(box); drawCover(c, art, box); c.restore() }
+            else { fill.color = withAlpha(pal.CYAN, 26); c.drawRect(box, fill) }
+            brackets(c, box, 1.8f * u, 0.4f * u, pal.CYAN)
+        }
+
+        label(c, "STANDING BY · TURN THE KNOB TO WAKE", a.centerX(), a.bottom - 3.5f * u,
+            withAlpha(pal.CYAN, (70 + 100 * breath).toInt()), 2.4f, center = true)
+    }
+
     // ───────────────────────── BOOT ─────────────────────────
 
     private fun easeOut(x: Float): Float { val t = x.coerceIn(0f, 1f); return 1f - (1f - t) * (1f - t) * (1f - t) }
@@ -1223,5 +1604,6 @@ class DashRenderer {
         const val SHUTDOWN_COLLAPSE_MS = 1100
         const val SHUTDOWN_DOT_MS = 1600
         const val SHUTDOWN_MS = 2700
+        const val AMBIENT_DELAY_MS = 90_000L
     }
 }
