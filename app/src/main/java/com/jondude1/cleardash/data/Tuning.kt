@@ -14,6 +14,9 @@ import kotlin.math.roundToInt
  */
 object Tuning {
 
+    /** Cruising-speed bands (lower edge, mph) for fuel economy. */
+    private val BANDS = intArrayOf(30, 40, 50, 60, 70)
+
     data class Tip(
         val key: String,
         val title: String,
@@ -249,5 +252,4 @@ object Tuning {
         save()
     }
 
-    private val BANDS = intArrayOf(30, 40, 50, 60, 70)
 }
