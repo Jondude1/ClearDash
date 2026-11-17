@@ -176,6 +176,7 @@ object Trips {
         if (endLat != null && endLon != null) {
             Prefs.parkedJson = Spot(endLat, endLon, System.currentTimeMillis(), "Parked").toJson().toString()
         }
+        if (endLat != null && endLon != null) scope.launch { PlaceNames.lookup(endLat, endLon) } // name it for the NAV panel
         if (t.distanceMi < MIN_MILES) return null
         val fuelUsed = run {
             val a = t.fuelStartPct; val b = t.fuelNowPct
@@ -186,6 +187,7 @@ object Trips {
             t.topMph, t.overLimitSec, fuelUsed, endLat, endLon,
         )
         save(sum)
+        Prefs.debriefPending = sum.endedAt // the phone plays the power-down + debrief next time it's opened
         notifyPhone(ctx, sum)
         reportToAtlas(ctx, sum)
         return sum
@@ -231,6 +233,7 @@ object Trips {
         val a = JSONArray()
         (listOf(spot) + spots()).take(20).forEach { a.put(it.toJson()) }
         Prefs.spotsJson = a.toString()
+        scope.launch { PlaceNames.lookup(lat, lon) }
         return spot
     }
 
@@ -245,7 +248,9 @@ object Trips {
     private fun notifyPhone(ctx: Context, t: TripSummary) {
         try {
             val pi = PendingIntent.getActivity(
-                ctx, 1, Intent(ctx, MainActivity::class.java),
+                ctx, 1, Intent(ctx, MainActivity::class.java)
+                    .putExtra(MainActivity.EXTRA_DEBRIEF, true)
+                    .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
             val body = t.lines().joinToString("\n") { (k, v) -> "$k: $v" }

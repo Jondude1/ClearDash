@@ -13,6 +13,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import com.jondude1.cleardash.R
+import androidx.compose.ui.graphics.graphicsLayer
+import com.jondude1.cleardash.data.Prefs
+import com.jondude1.cleardash.data.TripSummary
+import com.jondude1.cleardash.data.Trips
 import com.jondude1.cleardash.render.DashRenderer
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -56,15 +60,46 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        if (intent?.getBooleanExtra(EXTRA_DEBRIEF, false) == true) debriefAsked.value = true
         setContent {
             ClearDashTheme {
-                var intro by rememberSaveable { mutableStateOf(true) }
+                // After a drive: power-down sequence, then the debrief. Otherwise: the boot sequence.
+                val trip = remember(debriefAsked.value) { pendingDebrief(debriefAsked.value) }
+                var stage by rememberSaveable(trip?.endedAt) { mutableIntStateOf(if (trip != null) 1 else 0) }
                 Box(Modifier.fillMaxSize().background(Color.Black)) {
                     AppRoot()
-                    if (intro) IntroOverlay { intro = false }
+                    when {
+                        stage == 0 && trip == null && !introShown -> IntroOverlay { introShown = true; stage = 3 }
+                        stage == 1 && trip != null -> ShutdownOverlay(trip) { stage = 2 }
+                        stage == 2 && trip != null -> DebriefOverlay(trip) {
+                            Prefs.debriefPending = 0L
+                            debriefAsked.value = false
+                            stage = 3
+                        }
+                    }
                 }
             }
         }
+    }
+
+    private val debriefAsked = mutableStateOf(false)
+    private var introShown = false
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_DEBRIEF, false)) debriefAsked.value = true
+    }
+
+    /** The trip to debrief: asked for from the notification, or finished in the last 6 hours and not shown yet. */
+    private fun pendingDebrief(asked: Boolean): TripSummary? {
+        val last = Trips.last() ?: return null
+        val unseen = Prefs.debriefPending != 0L && Prefs.debriefPending == last.endedAt &&
+            System.currentTimeMillis() - last.endedAt < 6 * 3_600_000L
+        return if (asked || unseen) last else null
+    }
+
+    companion object {
+        const val EXTRA_DEBRIEF = "show_debrief"
     }
 
     override fun onStart() {
@@ -195,6 +230,63 @@ private fun IntroOverlay(onDone: () -> Unit) {
     ) {
         drawIntoCanvas {
             renderer.drawIntro(it.nativeCanvas, size.width, size.height, e.coerceAtMost(DashRenderer.INTRO_HOLD_MS.toLong()))
+        }
+    }
+}
+
+/** Power-down: the boot sequence in reverse. Tap to skip. */
+@Composable
+private fun ShutdownOverlay(trip: TripSummary, onDone: () -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val renderer = remember { DashRenderer().loadAssets(ctx) }
+    val start = remember { System.currentTimeMillis() }
+    var now by remember { mutableLongStateOf(start) }
+    LaunchedEffect(Unit) {
+        while (now - start < DashRenderer.SHUTDOWN_MS) withFrameMillis { now = System.currentTimeMillis() }
+        onDone()
+    }
+    Canvas(
+        Modifier
+            .fillMaxSize()
+            .clickableNoRipple { onDone() }
+    ) {
+        drawIntoCanvas {
+            renderer.drawShutdown(it.nativeCanvas, size.width, size.height, now - start, trip.headline())
+        }
+    }
+}
+
+/** The trip debrief, slid up over the app after the power-down. */
+@Composable
+private fun DebriefOverlay(trip: TripSummary, onDone: () -> Unit) {
+    val shown = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(Unit) { shown.animateTo(1f, androidx.compose.animation.core.tween(380)) }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(C.bg.copy(alpha = 0.92f))
+            .clickableNoRipple { },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .graphicsLayer { translationY = (1f - shown.value) * 120f; alpha = shown.value }
+                .safeDrawingPadding()
+        ) {
+            Text(
+                "SYSTEMS OFFLINE", color = C.muted, fontFamily = HoloMono, fontSize = 12.sp, letterSpacing = 3.sp,
+                modifier = Modifier.padding(start = 20.dp, bottom = 6.dp)
+            )
+            SectionCard("Trip debrief", trip.headline()) {
+                val day = java.text.SimpleDateFormat("EEEE, MMM d · h:mm a", java.util.Locale.US).format(java.util.Date(trip.startedAt))
+                Hint(day)
+                trip.lines().forEach { (k, v) -> StatusLine(k, v, null) }
+                if (trip.endLat != null && trip.endLon != null) StatusLine("Parked", "Saved", true)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Pill("Done") { onDone() }
+                }
+            }
         }
     }
 }

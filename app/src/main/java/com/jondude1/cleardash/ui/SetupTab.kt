@@ -111,6 +111,8 @@ fun SetupTab() {
         PermissionsCard(recheck) { recheck++ }
         AndroidAutoCard()
         KnobCard()
+        NavigationCard()
+        NightModeCard()
         AtlasLinkCard()
         CalloutsCard()
         VehicleCard(prefsVersion)
@@ -199,6 +201,38 @@ private fun KnobCard() {
             }
         }
         Hint("Parked, you can also tap the dashboard to flip views.")
+    }
+}
+
+@Composable
+private fun NavigationCard() {
+    var home by remember { mutableStateOf(Prefs.homeAddr) }
+    var work by remember { mutableStateOf(Prefs.workAddr) }
+    SectionCard("Navigation", "NAV on the car screen hands off to Google Maps") {
+        OutlinedTextField(
+            value = home, onValueChange = { home = it; Prefs.homeAddr = it }, singleLine = true,
+            label = { Text("Home address") }, modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = work, onValueChange = { work = it; Prefs.workAddr = it }, singleLine = true,
+            label = { Text("Work address") }, modifier = Modifier.fillMaxWidth(),
+        )
+        Hint("On the car: nudge to NAV, press, then pick Google Maps, Home, Work, where you parked, a saved place or a recent destination. " +
+            "Google Maps opens with turn-by-turn. To come back, tap ClearDash in Android Auto's app bar — it switches to the ROUTE view " +
+            "with the next turn large, and back to DRIVE when the route ends.")
+    }
+}
+
+@Composable
+private fun NightModeCard() {
+    @Suppress("UNUSED_VARIABLE") val pv by Prefs.version.collectAsState()
+    SectionCard("Night red mode", "Deep red after dark, easier on your night vision") {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(0 to "Off", 1 to "Auto", 2 to "Always").forEach { (m, label) ->
+                Pill(label, if (Prefs.nightMode == m) C.cyan else C.muted) { Prefs.nightMode = m }
+            }
+        }
+        Hint("Auto follows the CX-5's own night signal (headlights on), the same switch that dims Android Auto. The phone preview follows sunset.")
     }
 }
 

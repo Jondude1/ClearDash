@@ -8,6 +8,8 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.Alignment
 import com.jondude1.cleardash.data.TripSummary
 import com.jondude1.cleardash.data.Trips
+import com.jondude1.cleardash.data.Sun
+import com.jondude1.cleardash.data.Prefs
 import android.graphics.RectF
 import androidx.compose.ui.platform.LocalContext
 import com.jondude1.cleardash.Features
@@ -33,6 +35,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
@@ -68,10 +71,16 @@ fun LiveTab() {
                 .padding(horizontal = 16.dp)
                 .fillMaxWidth()
                 .aspectRatio(5f / 3f) // CX-5 screen: 800×480
+                .clipToBounds()
                 .border(1.dp, C.edge.copy(alpha = 0.45f))
                 .clickableNoRipple { mode = DashMode.entries[(mode.ordinal + 1) % DashMode.entries.size] }
         ) {
             tick.let { } // redraw every frame for smooth needle motion
+            renderer.night = when (Prefs.nightMode) {
+                2 -> true
+                1 -> Sun.isDark(state.lat, state.lon)
+                else -> false
+            }
             drawIntoCanvas {
                 renderer.draw(it.nativeCanvas, RectF(0f, 0f, size.width, size.height), size.width.toInt(), size.height.toInt(), state, mode)
             }

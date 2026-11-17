@@ -25,6 +25,7 @@ import androidx.lifecycle.lifecycleScope
 import com.jondude1.cleardash.R
 import com.jondude1.cleardash.data.DataHub
 import com.jondude1.cleardash.data.MediaSource
+import com.jondude1.cleardash.data.Prefs
 import com.jondude1.cleardash.render.DashMode
 import com.jondude1.cleardash.render.DashRenderer
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -37,7 +38,7 @@ import kotlin.math.ln
  * The main car screen: a custom-drawn dashboard.
  *
  * Built for the CX-5 commander knob, since Mazda locks the touchscreen while moving:
- *  • Nudge the knob to reach the side buttons (Drive / Systems / ⌘ quick actions) and the
+ *  • Nudge the knob to reach the side buttons (NAV / Drive / Systems / ⌘ quick actions) and the
  *    media buttons (back · play/pause · forward); press the knob to select.
  *  • Select the "move" button, then simply turn the knob to flip between views.
  *  • Parked, tapping the screen also flips views.
@@ -68,6 +69,16 @@ class DashScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback, DefaultLifecyc
         lifecycle.addObserver(this)
         renderer.loadAssets(carContext)
         carContext.getCarService(AppManager::class.java).setSurfaceCallback(this)
+        // A route starting in Google Maps flips to the ROUTE view; when it ends, back to DRIVE.
+        lifecycleScope.launch {
+            DataHub.state
+                .map { it.nav != null }
+                .distinctUntilChanged()
+                .collect { on ->
+                    if (on) currentMode = DashMode.ROUTE
+                    else if (currentMode == DashMode.ROUTE) currentMode = DashMode.DASH
+                }
+        }
         // Rebuild the buttons only when the media controls actually need to change.
         lifecycleScope.launch {
             DataHub.state
@@ -158,6 +169,12 @@ class DashScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback, DefaultLifecyc
                 try {
                     val v = visible
                     val area = if (v != null && !v.isEmpty) RectF(v) else RectF(0f, 0f, sc.width.toFloat(), sc.height.toFloat())
+                    // Night red mode follows the car's own night signal (headlights) in auto.
+                    renderer.night = when (Prefs.nightMode) {
+                        2 -> true
+                        1 -> try { carContext.isDarkMode } catch (_: Exception) { false }
+                        else -> false
+                    }
                     renderer.draw(canvas, area, sc.width, sc.height, DataHub.state.value, currentMode, inPanMode)
                 } finally {
                     surface.unlockCanvasAndPost(canvas)
@@ -177,6 +194,13 @@ class DashScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback, DefaultLifecyc
 
     override fun onGetTemplate(): Template {
         val strip = ActionStrip.Builder()
+            .addAction(
+                Action.Builder()
+                    .setIcon(icon(R.drawable.ic_q_nav))
+                    .setTitle("NAV")
+                    .setOnClickListener { carContext.getCarService(ScreenManager::class.java).push(NavScreen(carContext)) }
+                    .build()
+            )
             .addAction(action(R.drawable.ic_stat) { setMode(DashMode.DASH) })
             .addAction(action(R.drawable.ic_act_gauges) { setMode(DashMode.GAUGES) })
             .addAction(action(R.drawable.ic_q_quick) {

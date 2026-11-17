@@ -32,7 +32,7 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /** The car screen's views, in knob order. */
-enum class DashMode(val title: String) { DASH("DRIVE"), GAUGES("SYSTEMS") }
+enum class DashMode(val title: String) { DASH("DRIVE"), ROUTE("ROUTE"), GAUGES("SYSTEMS") }
 
 /**
  * Draws every ClearDash view onto a plain Canvas. The Android Auto surface and the phone
@@ -46,20 +46,27 @@ enum class DashMode(val title: String) { DASH("DRIVE"), GAUGES("SYSTEMS") }
  */
 class DashRenderer {
 
-    object Pal {
-        val GROUND = Color.parseColor("#02070A")
-        val GROUND_2 = Color.parseColor("#041118")
-        val GLASS = Color.parseColor("#D9041A24")
-        val CYAN = Color.parseColor("#00E5FF")
-        val CYAN_DIM = Color.parseColor("#9900E5FF")
-        val CYAN_FAINT = Color.parseColor("#3300E5FF")
-        val CYAN_GHOST = Color.parseColor("#1400E5FF")
-        val CELL_OFF = Color.parseColor("#2200E5FF")
-        val TEXT = Color.parseColor("#E8FBFF")
-        val TEXT2 = Color.parseColor("#B5D6DE")
-        val MUTED = Color.parseColor("#7C9CA6")
-        val ORANGE = Color.parseColor("#FF5C00")   // ATLAS accent: over the limit
-        val ALARM = Color.parseColor("#FF3B30")    // well over the limit
+    /**
+     * Two palettes. Day: ATLAS cyan hologram. Night: deep red, like a fighter cockpit, so
+     * the screen doesn't wreck your night vision; amber/white mark speeding instead.
+     */
+    class Palette(val night: Boolean) {
+        private fun c(day: String, nightHex: String) = Color.parseColor(if (night) nightHex else day)
+        val GROUND = c("#02070A", "#050101")
+        val GROUND_2 = c("#041118", "#120303")
+        val GLASS = c("#D9041A24", "#D9170405")
+        val CYAN = c("#00E5FF", "#E5141A")          // the accent light
+        val CYAN_DIM = c("#9900E5FF", "#99E5141A")
+        val CYAN_FAINT = c("#3300E5FF", "#33E5141A")
+        val CYAN_GHOST = c("#1400E5FF", "#12E5141A")
+        val CELL_OFF = c("#2200E5FF", "#26E5141A")
+        val TEXT = c("#E8FBFF", "#F0B4AC")
+        val TEXT2 = c("#B5D6DE", "#C98880")
+        val MUTED = c("#7C9CA6", "#8A4C47")
+        val ORANGE = c("#FF5C00", "#FFB000")   // over the limit
+        val ALARM = c("#FF3B30", "#FFFFFF")    // well over the limit
+        val HOLO_PROJ = c("#26324A", "#3A0A0A")
+        val BRAKE = c("#FF2A2A", "#FFB000")
     }
 
     // Fonts: Space Mono for readouts and labels, Sora for words. System fallbacks until loadAssets().
@@ -73,22 +80,31 @@ class DashRenderer {
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val text = Paint(Paint.ANTI_ALIAS_FLAG)
     private val bmpPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-    private val holoFilter = ColorMatrixColorFilter(
-        ColorMatrix(
-            floatArrayOf(
-                0.05f, 0.18f, 0.02f, 0f, 0f,
-                0.20f, 0.72f, 0.07f, 0f, 40f,
-                0.22f, 0.78f, 0.08f, 0f, 60f,
-                0f, 0f, 0f, 1f, 0f,
-            )
-        )
-    )
     private val r = RectF()
     private val r2 = RectF()
     private val path = Path()
     private val clock = SimpleDateFormat("h:mm", Locale.US)
     private val ampm = SimpleDateFormat("a", Locale.US)
     private val dateFmt = SimpleDateFormat("EEE · MMM d", Locale.US)
+
+    private var pal = DAY
+    private val dayFilter = ColorMatrixColorFilter(ColorMatrix(floatArrayOf(
+        0.05f, 0.18f, 0.02f, 0f, 0f,
+        0.20f, 0.72f, 0.07f, 0f, 40f,
+        0.22f, 0.78f, 0.08f, 0f, 60f,
+        0f, 0f, 0f, 1f, 0f,
+    )))
+    private val nightFilter = ColorMatrixColorFilter(ColorMatrix(floatArrayOf(
+        0.25f, 0.80f, 0.08f, 0f, 50f,
+        0.03f, 0.10f, 0.01f, 0f, 0f,
+        0.03f, 0.08f, 0.01f, 0f, 0f,
+        0f, 0f, 0f, 1f, 0f,
+    )))
+
+    /** Night red mode on/off. */
+    var night: Boolean
+        get() = pal.night
+        set(v) { pal = if (v) NIGHT else DAY }
 
     private var shownSpeed = 0f
     private val holoCar = HoloCar()
@@ -151,6 +167,7 @@ class DashRenderer {
         val save = if (t < 1f) c.saveLayerAlpha(body, (255 * t).toInt()) else -1
         when (mode) {
             DashMode.DASH -> drawDrive(c, body, s)
+            DashMode.ROUTE -> drawRoute(c, body, s)
             DashMode.GAUGES -> drawSystems(c, body, s)
         }
         if (save >= 0) {
@@ -159,7 +176,7 @@ class DashRenderer {
             stroke.shader = null
             stroke.strokeCap = Paint.Cap.BUTT
             stroke.strokeWidth = 0.5f * u
-            stroke.color = Pal.CYAN_DIM
+            stroke.color = pal.CYAN_DIM
             c.drawLine(body.left, y, body.right, y, stroke)
         }
 
@@ -175,14 +192,14 @@ class DashRenderer {
     // ───────────────────────── ground ─────────────────────────
 
     private fun drawGround(c: Canvas, w: Float, h: Float) {
-        fill.shader = RadialGradient(w * 0.3f, h * 0.45f, max(w, h) * 0.75f, Pal.GROUND_2, Pal.GROUND, Shader.TileMode.CLAMP)
+        fill.shader = RadialGradient(w * 0.3f, h * 0.45f, max(w, h) * 0.75f, pal.GROUND_2, pal.GROUND, Shader.TileMode.CLAMP)
         c.drawRect(0f, 0f, w, h, fill)
         fill.shader = null
         // faint blueprint grid
         val step = max(h / 100f, 1f) * 6f
         stroke.shader = null
         stroke.strokeWidth = 1f
-        stroke.color = Pal.CYAN_GHOST
+        stroke.color = pal.CYAN_GHOST
         var x = step
         while (x < w) { c.drawLine(x, 0f, x, h, stroke); x += step }
         var y = step
@@ -197,25 +214,25 @@ class DashRenderer {
         var x = b.left + pad
 
         // wordmark
-        fill.color = Pal.CYAN
+        fill.color = pal.CYAN
         path.reset()
         path.moveTo(x, y + 0.2f * u); path.lineTo(x + 2.4f * u, y + 0.2f * u); path.lineTo(x + 2.4f * u, y - 2.2f * u); path.close()
         c.drawPath(path, fill)
         x += 3.6f * u
-        label(c, "CLEARDASH", x, y, Pal.CYAN, 3.0f, bold = true)
+        label(c, "CLEARDASH", x, y, pal.CYAN, 3.0f, bold = true)
         x += textW("CLEARDASH", 3.0f, bold = true) + 5f * u
 
         if (knobHint) {
             val blink = 0.55f + 0.45f * sin(SystemClock.uptimeMillis() / 260.0).toFloat()
-            label(c, "◀  TURN THE KNOB TO SWITCH VIEW  ▶", x, y, withAlpha(Pal.CYAN, (255 * blink).toInt()), 3.0f, bold = true)
+            label(c, "◀  TURN THE KNOB TO SWITCH VIEW  ▶", x, y, withAlpha(pal.CYAN, (255 * blink).toInt()), 3.0f, bold = true)
         } else {
             for (m in DashMode.entries) {
                 val on = m == mode
-                label(c, m.title, x, y, if (on) Pal.TEXT else Pal.MUTED, 3.0f, bold = on)
+                label(c, m.title, x, y, if (on) pal.TEXT else pal.MUTED, 3.0f, bold = on)
                 val w = textW(m.title, 3.0f, bold = on)
                 if (on) {
                     r.set(x - 1.4f * u, b.top + 1.4f * u, x + w + 0.6f * u, b.bottom - 1.0f * u)
-                    brackets(c, r, 1.6f * u, 0.3f * u, Pal.CYAN)
+                    brackets(c, r, 1.6f * u, 0.3f * u, pal.CYAN)
                 }
                 x += w + 5f * u
             }
@@ -226,9 +243,9 @@ class DashRenderer {
         val now = Date()
         val t = clock.format(now)
         val ap = ampm.format(now)
-        label(c, ap, rx, y, Pal.MUTED, 2.6f, right = true)
+        label(c, ap, rx, y, pal.MUTED, 2.6f, right = true)
         rx -= textW(ap, 2.6f) + 1.2f * u
-        label(c, t, rx, y, Pal.TEXT, 3.4f, bold = true, right = true)
+        label(c, t, rx, y, pal.TEXT, 3.4f, bold = true, right = true)
         rx -= textW(t, 3.4f, bold = true) + 4.5f * u
 
         val links = listOf(
@@ -239,15 +256,15 @@ class DashRenderer {
         )
         for ((name, ok) in links) {
             val w = textW(name, 2.6f)
-            label(c, name, rx, y, if (ok) Pal.TEXT2 else withAlpha(Pal.MUTED, 150), 2.6f, right = true)
+            label(c, name, rx, y, if (ok) pal.TEXT2 else withAlpha(pal.MUTED, 150), 2.6f, right = true)
             val dx = rx - w - 1.9f * u
             if (ok) {
-                fill.color = Pal.CYAN
+                fill.color = pal.CYAN
                 c.drawRect(dx - 0.6f * u, y - 1.6f * u, dx + 0.6f * u, y - 0.4f * u, fill)
             } else {
                 stroke.shader = null
                 stroke.strokeWidth = 0.22f * u
-                stroke.color = Pal.MUTED
+                stroke.color = pal.MUTED
                 c.drawRect(dx - 0.6f * u, y - 1.6f * u, dx + 0.6f * u, y - 0.4f * u, stroke)
             }
             rx -= w + 5.2f * u
@@ -255,7 +272,7 @@ class DashRenderer {
 
         // hairline under the strip, brighter in the middle
         fill.shader = LinearGradient(b.left, 0f, b.right, 0f,
-            intArrayOf(withAlpha(Pal.CYAN, 0), Pal.CYAN_DIM, withAlpha(Pal.CYAN, 0)), null, Shader.TileMode.CLAMP)
+            intArrayOf(withAlpha(pal.CYAN, 0), pal.CYAN_DIM, withAlpha(pal.CYAN, 0)), null, Shader.TileMode.CLAMP)
         c.drawRect(b.left, b.bottom - 0.25f * u, b.right, b.bottom, fill)
         fill.shader = null
     }
@@ -310,7 +327,7 @@ class DashRenderer {
         val maxSpeed = if (speed > 95) 140f else 100f
         val over = limit != null && speed > limit + 2
         val wayOver = limit != null && speed > limit + 9
-        val hot = when { wayOver -> Pal.ALARM; over -> Pal.ORANGE; else -> Pal.CYAN }
+        val hot = when { wayOver -> pal.ALARM; over -> pal.ORANGE; else -> pal.CYAN }
         val tms = SystemClock.uptimeMillis()
 
         // core glow
@@ -322,11 +339,11 @@ class DashRenderer {
         stroke.shader = null
         stroke.strokeCap = Paint.Cap.BUTT
         stroke.strokeWidth = 0.3f * u
-        stroke.color = Pal.CYAN_FAINT
+        stroke.color = pal.CYAN_FAINT
         r.set(cx - rad, cy - rad, cx + rad, cy + rad)
         val rot = (tms % 60_000L) / 60_000f * 360f
         for (i in 0 until 24) c.drawArc(r, rot + i * 15f, 9f, false, stroke)
-        fill.color = Pal.CYAN_DIM
+        fill.color = pal.CYAN_DIM
         for (k in 0 until 3) {
             val ang = Math.toRadians((rot + k * 120f).toDouble())
             c.drawCircle(cx + (rad * cos(ang)).toFloat(), cy + (rad * sin(ang)).toFloat(), 0.7f * u, fill)
@@ -345,10 +362,10 @@ class DashRenderer {
             val v = (i + 0.5f) / cells * maxSpeed
             val isLit = i < lit.toInt() || (i == lit.toInt() && lit - i > 0.4f)
             stroke.color = when {
-                !isLit -> Pal.CELL_OFF
-                limit != null && v > limit + 9 -> Pal.ALARM
-                limit != null && v > limit + 2 -> Pal.ORANGE
-                else -> Pal.CYAN
+                !isLit -> pal.CELL_OFF
+                limit != null && v > limit + 9 -> pal.ALARM
+                limit != null && v > limit + 2 -> pal.ORANGE
+                else -> pal.CYAN
             }
             c.drawArc(r, start + i * step + step * 0.14f, step * 0.72f, false, stroke)
         }
@@ -357,19 +374,19 @@ class DashRenderer {
         for (v in 0..maxSpeed.toInt() step 20) {
             val ang = Math.toRadians(start + sweep * v / maxSpeed.toDouble())
             stroke.strokeWidth = 0.3f * u
-            stroke.color = Pal.CYAN_DIM
+            stroke.color = pal.CYAN_DIM
             c.drawLine(cx + (tickR * cos(ang)).toFloat(), cy + (tickR * sin(ang)).toFloat(),
                 cx + ((tickR - 1.6f * u) * cos(ang)).toFloat(), cy + ((tickR - 1.6f * u) * sin(ang)).toFloat(), stroke)
             if (v > 0 && v < maxSpeed.toInt()) {
                 val nr = tickR - 4.4f * u
-                label(c, v.toString(), cx + (nr * cos(ang)).toFloat(), cy + (nr * sin(ang)).toFloat() + 0.9f * u, Pal.MUTED, 2.6f, center = true)
+                label(c, v.toString(), cx + (nr * cos(ang)).toFloat(), cy + (nr * sin(ang)).toFloat() + 0.9f * u, pal.MUTED, 2.6f, center = true)
             }
         }
         // speed-limit marker: a bright notch across the ring
         if (limit != null && limit <= maxSpeed) {
             val ang = Math.toRadians(start + sweep * limit / maxSpeed.toDouble())
             stroke.strokeWidth = 0.6f * u
-            stroke.color = Pal.TEXT
+            stroke.color = pal.TEXT
             val ro = segR + 2.6f * u
             val ri = segR - 2.6f * u
             c.drawLine(cx + (ro * cos(ang)).toFloat(), cy + (ro * sin(ang)).toFloat(),
@@ -378,10 +395,10 @@ class DashRenderer {
 
         // inner core ring
         val coreR = segR * 0.64f
-        fill.color = withAlpha(Pal.GROUND, 200)
+        fill.color = withAlpha(pal.GROUND, 200)
         c.drawCircle(cx, cy, coreR, fill)
         stroke.strokeWidth = 0.3f * u
-        stroke.color = Pal.CYAN_DIM
+        stroke.color = pal.CYAN_DIM
         c.drawCircle(cx, cy, coreR, stroke)
 
         // the number
@@ -389,10 +406,10 @@ class DashRenderer {
         text.textAlign = Paint.Align.CENTER
         text.textSize = fitSize(shown, coreR * 1.55f, coreR * 0.78f, coreR * 0.4f, monoBold)
         text.typeface = monoBold
-        text.color = if (over) hot else Pal.TEXT
+        text.color = if (over) hot else pal.TEXT
         c.drawText(shown, cx, cy + text.textSize * 0.30f, text)
         text.textAlign = Paint.Align.LEFT
-        label(c, "MPH", cx, cy + coreR * 0.56f, Pal.CYAN, 2.8f, bold = true, center = true)
+        label(c, "MPH", cx, cy + coreR * 0.56f, pal.CYAN, 2.8f, bold = true, center = true)
 
         // speed limit readout in the ring's open bottom
         val by = cy + segR * 0.86f
@@ -400,22 +417,22 @@ class DashRenderer {
             val w = 15f * u
             val h = 11.5f * u
             r2.set(cx - w / 2, by - h / 2, cx + w / 2, by + h / 2)
-            fill.color = if (over) withAlpha(hot, 60) else withAlpha(Pal.GROUND, 230)
+            fill.color = if (over) withAlpha(hot, 60) else withAlpha(pal.GROUND, 230)
             c.drawRect(r2, fill)
             stroke.strokeWidth = 0.25f * u
-            stroke.color = if (over) hot else Pal.CYAN_DIM
+            stroke.color = if (over) hot else pal.CYAN_DIM
             c.drawRect(r2, stroke)
             val box2 = RectF(r2)
-            brackets(c, box2, 1.6f * u, 0.4f * u, if (over) hot else Pal.CYAN)
-            label(c, "LIMIT", cx, box2.top + 3.5f * u, if (over) hot else Pal.MUTED, 2.4f, center = true)
+            brackets(c, box2, 1.6f * u, 0.4f * u, if (over) hot else pal.CYAN)
+            label(c, "LIMIT", cx, box2.top + 3.5f * u, if (over) hot else pal.MUTED, 2.4f, center = true)
             text.typeface = monoBold
             text.textAlign = Paint.Align.CENTER
             text.textSize = 6.2f * u
-            text.color = if (over) hot else Pal.TEXT
+            text.color = if (over) hot else pal.TEXT
             c.drawText(limit.toString(), cx, box2.bottom - 1.6f * u, text)
             text.textAlign = Paint.Align.LEFT
         } else {
-            label(c, if (s.gpsOk) "NO LIMIT DATA" else "ACQUIRING GPS", cx, by + 1f * u, Pal.MUTED, 2.6f, center = true)
+            label(c, if (s.gpsOk) "NO LIMIT DATA" else "ACQUIRING GPS", cx, by + 1f * u, pal.MUTED, 2.6f, center = true)
         }
     }
 
@@ -428,9 +445,9 @@ class DashRenderer {
             val avail = b.bottom - top
             val d = min(avail * 0.92f, 19f * u)
             val box = RectF(b.left, top, b.left + d, top + d)
-            fill.color = withAlpha(Pal.CYAN, 26)
+            fill.color = withAlpha(pal.CYAN, 26)
             c.drawRect(box, fill)
-            brackets(c, box, 2.2f * u, 0.45f * u, Pal.CYAN)
+            brackets(c, box, 2.2f * u, 0.45f * u, pal.CYAN)
             nav.icon?.let { drawTinted(c, it, box, 0.18f) }
 
             val tx = box.right + 4f * u
@@ -439,16 +456,16 @@ class DashRenderer {
             text.textAlign = Paint.Align.LEFT
             text.textSize = fitSize(dist, tw, min(9.5f * u, avail * 0.42f), 5f * u, monoBold)
             text.typeface = monoBold
-            text.color = Pal.TEXT
+            text.color = pal.TEXT
             val distBase = top + text.textSize * 0.86f
             c.drawText(dist, tx, distBase, text)
             text.typeface = sans
             text.textSize = 4.3f * u
-            text.color = Pal.TEXT2
+            text.color = pal.TEXT2
             val lines = if (avail > 24f * u) 2 else 1
             wrap(c, nav.instruction, tx, distBase + 5.8f * u, tw, lines, 5.4f * u)
             if (nav.eta.isNotEmpty() && avail > 20f * u) {
-                label(c, nav.eta.uppercase(), tx, b.bottom - 0.6f * u, Pal.CYAN_DIM, 2.6f, maxW = tw)
+                label(c, nav.eta.uppercase(), tx, b.bottom - 0.6f * u, pal.CYAN_DIM, 2.6f, maxW = tw)
             }
         } else if (h >= 22f * u) {
             drawVehicleHolo(c, b, s)
@@ -459,17 +476,17 @@ class DashRenderer {
             text.typeface = sansLight
             text.textAlign = Paint.Align.LEFT
             text.textSize = clockSize
-            text.color = Pal.TEXT
+            text.color = pal.TEXT
             val base = b.top + 5.5f * u + clockSize * 0.82f
             val t = clock.format(now)
             c.drawText(t, b.left - 0.4f * u, base, text)
             val tw = text.measureText(t)
-            label(c, ampm.format(now), b.left + tw + 1.6f * u, base, Pal.CYAN, 3.2f, bold = true)
+            label(c, ampm.format(now), b.left + tw + 1.6f * u, base, pal.CYAN, 3.2f, bold = true)
             if (h > 26f * u) {
-                label(c, dateFmt.format(now).uppercase(), b.left, base + 5.6f * u, Pal.TEXT2, 2.9f)
+                label(c, dateFmt.format(now).uppercase(), b.left, base + 5.6f * u, pal.TEXT2, 2.9f)
             }
             if (h > 32f * u) {
-                label(c, "NO ACTIVE ROUTE · START ONE IN GOOGLE MAPS", b.left, b.bottom - 0.6f * u, Pal.MUTED, 2.5f, maxW = b.width())
+                label(c, "NO ACTIVE ROUTE · START ONE IN GOOGLE MAPS", b.left, b.bottom - 0.6f * u, pal.MUTED, 2.5f, maxW = b.width())
             }
         }
     }
@@ -480,7 +497,7 @@ class DashRenderer {
         val colW = min(24f * u, b.width() * 0.30f)
         val carBox = RectF(b.left + colW, b.top + 3.5f * u, b.right, b.bottom - 4f * u)
         holoCar.update(s)
-        holoCar.draw(c, carBox, u)
+        holoCar.draw(c, carBox, u, pal)
 
         val hdg = s.bearing
         val dirs = arrayOf("N", "NE", "E", "SE", "S", "SW", "W", "NW")
@@ -497,12 +514,12 @@ class DashRenderer {
         var y = b.top + 9.5f * u
         val step = min(9f * u, (b.bottom - 5f * u - y) / rows.size)
         for ((k, v) in rows) {
-            label(c, k, b.left, y, Pal.MUTED, 2.4f)
-            val col = when (v) { "BRAKING" -> Pal.ALARM; "ACCEL" -> Pal.CYAN; else -> Pal.TEXT }
+            label(c, k, b.left, y, pal.MUTED, 2.4f)
+            val col = when (v) { "BRAKING" -> pal.ALARM; "ACCEL" -> pal.CYAN; else -> pal.TEXT }
             label(c, v, b.left, y + 4.2f * u, col, 3.2f, bold = true, maxW = colW - 1f * u)
             y += step
         }
-        label(c, "NO ACTIVE ROUTE · START ONE IN GOOGLE MAPS", b.left, b.bottom - 0.6f * u, Pal.MUTED, 2.4f, maxW = b.width())
+        label(c, "NO ACTIVE ROUTE · START ONE IN GOOGLE MAPS", b.left, b.bottom - 0.6f * u, pal.MUTED, 2.4f, maxW = b.width())
     }
 
     private fun drawMedia(c: Canvas, b: RectF, m: MediaInfo) {
@@ -516,33 +533,33 @@ class DashRenderer {
             // faint scanlines over the art so it sits in the hologram
             stroke.shader = null
             stroke.strokeWidth = 1f
-            stroke.color = withAlpha(Pal.GROUND, 70)
+            stroke.color = withAlpha(pal.GROUND, 70)
             var y = art.top
             while (y < art.bottom) { c.drawLine(art.left, y, art.right, y, stroke); y += 0.9f * u }
         } else {
-            fill.color = withAlpha(Pal.CYAN, 26)
+            fill.color = withAlpha(pal.CYAN, 26)
             c.drawRect(art, fill)
             text.typeface = monoBold
             text.textAlign = Paint.Align.CENTER
             text.textSize = artSize * 0.42f
-            text.color = Pal.CYAN
+            text.color = pal.CYAN
             c.drawText(m.appName.take(1).uppercase(), art.centerX(), art.centerY() + text.textSize * 0.34f, text)
             text.textAlign = Paint.Align.LEFT
         }
-        brackets(c, art, 1.8f * u, 0.4f * u, Pal.CYAN)
+        brackets(c, art, 1.8f * u, 0.4f * u, pal.CYAN)
 
         val tx = art.right + 3.4f * u
         val tw = b.right - tx
-        label(c, (if (m.playing) "▶ " else "❚❚ ") + m.appName.uppercase(), tx, b.top + 2.8f * u, if (m.playing) Pal.CYAN else Pal.MUTED, 2.6f, maxW = tw)
+        label(c, (if (m.playing) "▶ " else "❚❚ ") + m.appName.uppercase(), tx, b.top + 2.8f * u, if (m.playing) pal.CYAN else pal.MUTED, 2.6f, maxW = tw)
         text.typeface = sansSemi
         text.textAlign = Paint.Align.LEFT
         text.textSize = 4.3f * u
-        text.color = Pal.TEXT
+        text.color = pal.TEXT
         c.drawText(fit(m.title.ifEmpty { m.appName }, tw), tx, b.top + 8.6f * u, text)
         if (b.height() > 15f * u && m.artist.isNotBlank()) {
             text.typeface = sans
             text.textSize = 3.5f * u
-            text.color = Pal.TEXT2
+            text.color = pal.TEXT2
             c.drawText(fit(m.artist, tw), tx, b.top + 13.2f * u, text)
         }
 
@@ -551,7 +568,7 @@ class DashRenderer {
             val timeTxt = if (m.longForm) "-" + fmtTime(m.durationMs - pos) else fmtTime(pos)
             val tW = textW(timeTxt, 2.6f)
             val by = b.bottom - 1.2f * u
-            label(c, timeTxt, b.right, by + 1.1f * u, Pal.MUTED, 2.6f, right = true)
+            label(c, timeTxt, b.right, by + 1.1f * u, pal.MUTED, 2.6f, right = true)
             segBar(c, RectF(tx, by - 0.5f * u, b.right - tW - 2.4f * u, by + 0.6f * u), 28, pos.toFloat() / m.durationMs)
         }
     }
@@ -568,6 +585,17 @@ class DashRenderer {
             Readout("BATTERY", if (live && o.voltage != null) "%.1f".format(o.voltage) else "--", "V", o.voltage?.let { (it - 10f) / 6f }),
             Readout("FUEL", if (live && o.fuelPct != null) "${o.fuelPct}" else "--", "%", o.fuelPct?.let { it / 100f }),
         )
+        if (!live) {
+            // no adapter: one clear status line instead of four empty readouts
+            label(c, "ENGINE TELEMETRY", b.left, b.top + 2.8f * u, pal.MUTED, 2.6f)
+            text.typeface = sans
+            text.textAlign = Paint.Align.LEFT
+            text.textSize = 4.0f * u
+            text.color = pal.TEXT2
+            c.drawText(fit("OBD · " + o.status, b.width()), b.left, b.top + 9.6f * u, text)
+            segBar(c, RectF(b.left, b.bottom - 1.4f * u, b.right, b.bottom - 0.2f * u), 40, 0f)
+            return
+        }
         val cw = b.width() / items.size
         items.forEachIndexed { i, it ->
             val x = b.left + cw * i + (if (i == 0) 0f else 2.6f * u)
@@ -575,41 +603,166 @@ class DashRenderer {
             if (i > 0) {
                 stroke.shader = null
                 stroke.strokeWidth = 0.22f * u
-                stroke.color = Pal.CYAN_FAINT
+                stroke.color = pal.CYAN_FAINT
                 c.drawLine(b.left + cw * i, b.top + 1f * u, b.left + cw * i, b.bottom - 1f * u, stroke)
             }
-            label(c, it.label, x, b.top + 2.8f * u, Pal.MUTED, 2.6f, maxW = w)
+            label(c, it.label, x, b.top + 2.8f * u, pal.MUTED, 2.6f, maxW = w)
             text.textAlign = Paint.Align.LEFT
             text.textSize = fitSize(it.value, w * 0.78f, 6.6f * u, 3.6f * u, monoBold)
             text.typeface = monoBold
-            text.color = if (live) Pal.TEXT else Pal.MUTED
+            text.color = if (live) pal.TEXT else pal.MUTED
             val vb = b.top + 10.4f * u
             c.drawText(it.value, x, vb, text)
             val vw = text.measureText(it.value)
             if (live && it.unit.isNotEmpty()) {
-                label(c, it.unit, x + vw + 0.8f * u, vb, Pal.CYAN_DIM, 2.4f)
+                label(c, it.unit, x + vw + 0.8f * u, vb, pal.CYAN_DIM, 2.4f)
             }
             val frac = if (live) it.frac?.coerceIn(0f, 1f) ?: 0f else 0f
             segBar(c, RectF(x, b.bottom - 1.4f * u, x + w, b.bottom - 0.2f * u), 10, frac)
         }
-        if (!live) {
-            label(c, o.status.uppercase(), b.right, b.top + 2.8f * u, Pal.MUTED, 2.4f, right = true, maxW = b.width() * 0.4f)
-        }
     }
 
     private fun drawAlert(c: Canvas, b: RectF, title: String, message: String) {
-        fill.color = withAlpha(Pal.CYAN, 30)
+        fill.color = withAlpha(pal.CYAN, 30)
         c.drawRect(b, fill)
-        brackets(c, b, 1.6f * u, 0.4f * u, Pal.CYAN)
+        brackets(c, b, 1.6f * u, 0.4f * u, pal.CYAN)
         val x = b.left + 2.8f * u
         val by = b.centerY() + 1.2f * u
         val head = title.uppercase()
-        label(c, head, x, by, Pal.CYAN, 3.0f, bold = true, maxW = b.width() * 0.48f)
+        label(c, head, x, by, pal.CYAN, 3.0f, bold = true, maxW = b.width() * 0.48f)
         val hw = min(textW(head, 3.0f, bold = true), b.width() * 0.48f)
         text.typeface = sans
         text.textSize = 3.6f * u
-        text.color = Pal.TEXT
+        text.color = pal.TEXT
         c.drawText(fit(message, b.right - x - hw - 5f * u), x + hw + 2.6f * u, by, text)
+    }
+
+    // ───────────────────────── ROUTE ─────────────────────────
+
+    /**
+     * Waze-style turn panel fed by the route Google Maps is navigating: a big maneuver arrow,
+     * huge distance, the instruction, a countdown bar for the last 400 m, plus speed, limit
+     * and a heading tape on the right. Google Maps does the routing; this is the readout.
+     */
+    private fun drawRoute(c: Canvas, a: RectF, s: VehicleState) {
+        val p = 4.5f * u
+        val inner = RectF(a.left + p, a.top + 2f * u, a.right - p, a.bottom - p)
+        val leftW = inner.width() * 0.63f
+        val left = RectF(inner.left, inner.top, inner.left + leftW, inner.bottom)
+        val right = RectF(left.right + p, inner.top, inner.right, inner.bottom)
+        holoPanel(c, left)
+        val ip = 4.2f * u
+        val b = RectF(left.left + ip, left.top + ip, left.right - ip, left.bottom - ip * 0.8f)
+        val nav = s.nav?.takeIf { System.currentTimeMillis() - it.updatedAt < 5 * 60_000 }
+
+        if (nav == null) {
+            tickHeader(c, "NAVIGATION", b.left, b.top + 2.6f * u)
+            text.typeface = sansLight
+            text.textAlign = Paint.Align.LEFT
+            text.textSize = 8f * u
+            text.color = pal.TEXT
+            c.drawText("No active route", b.left, b.top + 16f * u, text)
+            text.typeface = sans
+            text.textSize = 4f * u
+            text.color = pal.TEXT2
+            wrap(c, "Press NAV and pick a destination — Google Maps takes over the routing, and the next turn shows up here.", b.left, b.top + 25f * u, b.width(), 3, 5.4f * u)
+            label(c, "NAV → HOME · WORK · PARKED · PLACES · MAPS", b.left, b.bottom - 1f * u, pal.CYAN_DIM, 2.6f, maxW = b.width())
+        } else {
+            tickHeader(c, "NEXT MANEUVER", b.left, b.top + 2.6f * u)
+            val meters = distanceMeters(nav.distance)
+            val countdown = meters != null && meters < 400f
+            val barH = if (countdown) 5f * u else 0f
+            val etaH = if (nav.eta.isNotEmpty()) 5f * u else 0f
+            val top = b.top + 6f * u
+            val avail = b.bottom - top - barH - etaH
+            val d = min(avail * 0.95f, b.width() * 0.34f)
+            val box = RectF(b.left, top, b.left + d, top + d)
+            fill.color = withAlpha(pal.CYAN, 28)
+            c.drawRect(box, fill)
+            val lock = if (countdown) 1f - (meters!! / 400f) else 0f
+            brackets(c, RectF(box.left - lock * 1.6f * u, box.top - lock * 1.6f * u, box.right + lock * 1.6f * u, box.bottom + lock * 1.6f * u),
+                (3f + 2f * lock) * u, 0.55f * u, pal.CYAN)
+            nav.icon?.let { drawTinted(c, it, box, 0.14f) }
+
+            val tx = box.right + 4.5f * u
+            val tw = b.right - tx
+            val dist = nav.distance.ifEmpty { "NEXT" }
+            text.textAlign = Paint.Align.LEFT
+            text.textSize = fitSize(dist, tw, min(17f * u, d * 0.5f), 7f * u, monoBold)
+            text.typeface = monoBold
+            text.color = pal.TEXT
+            val distBase = top + text.textSize * 0.9f
+            c.drawText(dist, tx, distBase, text)
+            text.typeface = sans
+            text.textSize = 5.2f * u
+            text.color = pal.TEXT2
+            wrap(c, nav.instruction, tx, distBase + 7.5f * u, tw, 3, 6.4f * u)
+
+            if (countdown) {
+                val bar = RectF(b.left, b.bottom - etaH - barH + 1.4f * u, b.right, b.bottom - etaH - 1.6f * u)
+                segBar(c, bar, 30, lock)
+            }
+            if (nav.eta.isNotEmpty()) label(c, nav.eta.uppercase(), b.left, b.bottom - 0.6f * u, pal.CYAN_DIM, 2.8f, maxW = b.width())
+        }
+
+        // right: speed + limit, heading tape
+        val tapeH = 13f * u
+        val ringBox = RectF(right.left, right.top, right.right, right.bottom - tapeH - 2f * u)
+        val sz = min(ringBox.width(), ringBox.height())
+        drawReactor(c, RectF(ringBox.centerX() - sz / 2, ringBox.centerY() - sz / 2, ringBox.centerX() + sz / 2, ringBox.centerY() + sz / 2), s)
+        drawHeadingTape(c, RectF(right.left, right.bottom - tapeH, right.right, right.bottom), s.bearing)
+    }
+
+    /** A compass tape: ±60° around the heading, cardinal letters, the heading in the middle. */
+    private fun drawHeadingTape(c: Canvas, b: RectF, bearing: Float?) {
+        fill.color = withAlpha(pal.GROUND, 200)
+        c.drawRect(b, fill)
+        brackets(c, b, 1.6f * u, 0.35f * u, pal.CYAN_DIM)
+        val cx = b.centerX()
+        if (bearing == null) {
+            label(c, "HEADING · WAITING FOR MOVEMENT", cx, b.centerY() + 1f * u, pal.MUTED, 2.4f, center = true, maxW = b.width() - 2f * u)
+            return
+        }
+        val span = 60f
+        val pxPerDeg = (b.width() / 2f - 2f * u) / span
+        c.save()
+        c.clipRect(b)
+        var deg = (Math.floor(((bearing - span) / 5f).toDouble()) * 5).toInt()
+        while (deg <= bearing + span) {
+            val x = cx + (deg - bearing) * pxPerDeg
+            val norm = ((deg % 360) + 360) % 360
+            val major = norm % 45 == 0
+            stroke.shader = null
+            stroke.strokeCap = Paint.Cap.BUTT
+            stroke.strokeWidth = (if (major) 0.4f else 0.22f) * u
+            stroke.color = if (major) pal.CYAN else pal.CYAN_DIM
+            c.drawLine(x, b.bottom - 1f * u, x, b.bottom - (if (major) 4f else 2.4f) * u, stroke)
+            if (major) {
+                val name = arrayOf("N", "NE", "E", "SE", "S", "SW", "W", "NW")[norm / 45]
+                label(c, name, x, b.bottom - 5.4f * u, if (norm % 90 == 0) pal.TEXT else pal.TEXT2, 2.6f, bold = norm % 90 == 0, center = true)
+            }
+            deg += 5
+        }
+        c.restore()
+        // centre marker + readout
+        fill.color = pal.CYAN
+        path.reset()
+        path.moveTo(cx - 1.2f * u, b.top); path.lineTo(cx + 1.2f * u, b.top); path.lineTo(cx, b.top + 1.8f * u); path.close()
+        c.drawPath(path, fill)
+        label(c, "%03d°".format(((bearing.roundToInt() % 360) + 360) % 360), cx, b.top + 5.2f * u, pal.TEXT, 2.8f, bold = true, center = true)
+    }
+
+    /** "0.3 mi" / "500 ft" / "1.2 km" / "200 m" → metres. */
+    private fun distanceMeters(s: String): Float? {
+        val m = Regex("""([\d.,]+)\s*(mi|ft|km|m|yd)\b""", RegexOption.IGNORE_CASE).find(s) ?: return null
+        val v = m.groupValues[1].replace(",", "").toFloatOrNull() ?: return null
+        return when (m.groupValues[2].lowercase()) {
+            "mi" -> v * 1609.34f
+            "ft" -> v * 0.3048f
+            "yd" -> v * 0.9144f
+            "km" -> v * 1000f
+            else -> v
+        }
     }
 
     // ───────────────────────── SYSTEMS ─────────────────────────
@@ -640,7 +793,7 @@ class DashRenderer {
         val ch = inner.height() / rows
         stroke.shader = null
         stroke.strokeWidth = 0.22f * u
-        stroke.color = Pal.CYAN_FAINT
+        stroke.color = pal.CYAN_FAINT
         for (i in 1 until cols) c.drawLine(inner.left + cw * i, inner.top + 3f * u, inner.left + cw * i, inner.bottom - 3f * u, stroke)
         c.drawLine(inner.left + 3f * u, inner.top + ch, inner.right - 3f * u, inner.top + ch, stroke)
         gauges.forEachIndexed { i, g ->
@@ -659,18 +812,18 @@ class DashRenderer {
         val frac = if (live && v != null) ((v - g.min) / (g.max - g.min)).coerceIn(0f, 1f) else 0f
         segArc(c, cx, cy, rad, 135f, 270f, 27, frac, 1.9f * u)
         stroke.strokeWidth = 0.25f * u
-        stroke.color = Pal.CYAN_FAINT
+        stroke.color = pal.CYAN_FAINT
         c.drawCircle(cx, cy, rad - 3f * u, stroke)
 
         val shown = if (live && v != null) g.format(v) else "--"
         text.textAlign = Paint.Align.CENTER
         text.textSize = fitSize(shown, rad * 1.5f, rad * 0.56f, rad * 0.3f, monoBold)
         text.typeface = monoBold
-        text.color = if (live && v != null) Pal.TEXT else Pal.MUTED
+        text.color = if (live && v != null) pal.TEXT else pal.MUTED
         c.drawText(shown, cx, cy + text.textSize * 0.32f, text)
         text.textAlign = Paint.Align.LEFT
-        label(c, if (live) g.unit else status.uppercase(), cx, cy + rad * 0.66f, Pal.CYAN_DIM, 2.5f, center = true, maxW = b.width() - 6f * u)
-        if (live && g.sub != null) label(c, g.sub, cx, cy + rad * 0.66f + 3.8f * u, Pal.TEXT2, 2.5f, center = true)
+        label(c, if (live) g.unit else status.uppercase(), cx, cy + rad * 0.66f, pal.CYAN_DIM, 2.5f, center = true, maxW = b.width() - 6f * u)
+        if (live && g.sub != null) label(c, g.sub, cx, cy + rad * 0.66f + 3.8f * u, pal.TEXT2, 2.5f, center = true)
     }
 
     // ───────────────────────── BOOT ─────────────────────────
@@ -707,13 +860,13 @@ class DashRenderer {
         c.translate(cx, cy + carH * 0.42f)
         c.scale(1f, 0.22f)
         stroke.strokeWidth = 1.2f * u
-        stroke.color = Pal.CYAN_FAINT
+        stroke.color = pal.CYAN_FAINT
         c.drawCircle(0f, 0f, ringR, stroke)
         stroke.strokeWidth = 2.2f * u
-        stroke.color = Pal.CYAN
+        stroke.color = pal.CYAN
         r.set(-ringR, -ringR, ringR, ringR)
         c.drawArc(r, -90f, 360f * ringIn, false, stroke)
-        fill.shader = RadialGradient(0f, 0f, max(ringR, 1f), withAlpha(Pal.CYAN, (90 * carIn).toInt()), withAlpha(Pal.CYAN, 0), Shader.TileMode.CLAMP)
+        fill.shader = RadialGradient(0f, 0f, max(ringR, 1f), withAlpha(pal.CYAN, (90 * carIn).toInt()), withAlpha(pal.CYAN, 0), Shader.TileMode.CLAMP)
         c.drawCircle(0f, 0f, ringR, fill)
         fill.shader = null
         c.restore()
@@ -727,7 +880,7 @@ class DashRenderer {
             path.lineTo(cx - carW * 0.52f, cy - carH * 0.5f)
             path.close()
             fill.shader = LinearGradient(0f, cy + carH * 0.42f, 0f, cy - carH * 0.5f,
-                withAlpha(Pal.CYAN, (40 * carIn).toInt()), withAlpha(Pal.CYAN, 0), Shader.TileMode.CLAMP)
+                withAlpha(pal.CYAN, (40 * carIn).toInt()), withAlpha(pal.CYAN, 0), Shader.TileMode.CLAMP)
             c.drawPath(path, fill)
             fill.shader = null
         }
@@ -739,23 +892,23 @@ class DashRenderer {
             c.save()
             c.clipRect(dst.left - 2f, dst.top - 2f, dst.right + 2f, revealY)
             val flicker = if (e < 1500) (0.82f + 0.18f * sin(e / 23.0).toFloat()) else 1f
-            bmpPaint.colorFilter = holoFilter
+            bmpPaint.colorFilter = if (pal.night) nightFilter else dayFilter
             bmpPaint.alpha = (215 * flicker).toInt()
             c.drawBitmap(photo, null, dst, bmpPaint)
             bmpPaint.colorFilter = null
             bmpPaint.alpha = 255
             stroke.strokeWidth = 1f
-            stroke.color = withAlpha(Pal.GROUND, 120)
+            stroke.color = withAlpha(pal.GROUND, 120)
             var y = dst.top
             while (y < dst.bottom) { c.drawLine(dst.left, y, dst.right, y, stroke); y += max(2f, 0.7f * u) }
             c.restore()
             if (carIn < 1f) {
                 stroke.strokeWidth = 0.5f * u
-                stroke.color = Pal.CYAN
+                stroke.color = pal.CYAN
                 c.drawLine(dst.left - 2f * u, revealY, dst.right + 2f * u, revealY, stroke)
             }
             r2.set(dst.left - 3f * u, dst.top - 3f * u, dst.right + 3f * u, dst.bottom + 1f * u)
-            brackets(c, RectF(r2), 3f * u * carIn, 0.4f * u, withAlpha(Pal.CYAN, (255 * carIn).toInt()))
+            brackets(c, RectF(r2), 3f * u * carIn, 0.4f * u, withAlpha(pal.CYAN, (255 * carIn).toInt()))
         }
 
         // name
@@ -767,12 +920,12 @@ class DashRenderer {
         text.textAlign = Paint.Align.CENTER
         text.textSize = 6f * u
         text.letterSpacing = 0.5f
-        text.color = Pal.TEXT
+        text.color = pal.TEXT
         c.drawText(name.take(typed), cx + text.letterSpacing * text.textSize / 2, ty, text)
         text.letterSpacing = 0f
         text.textAlign = Paint.Align.LEFT
         val subTyped = (sub.length * phase(e, 1200, 1900)).toInt()
-        label(c, sub.take(subTyped), cx, ty + 5f * u, Pal.CYAN, 2.8f, center = true)
+        label(c, sub.take(subTyped), cx, ty + 5f * u, pal.CYAN, 2.8f, center = true)
 
         // systems check, right side
         val checks = listOf(
@@ -791,15 +944,87 @@ class DashRenderer {
             val show = checkIn * checks.size - i
             if (show <= 0f) return@forEachIndexed
             val a = (show.coerceIn(0f, 1f) * 255).toInt()
-            label(c, k, lx, ly, withAlpha(Pal.TEXT2, a), 2.8f)
+            label(c, k, lx, ly, withAlpha(pal.TEXT2, a), 2.8f)
             val ok = v !in setOf("SEARCH", "OFFLINE")
-            label(c, v, lx + lw, ly, withAlpha(if (ok) Pal.CYAN else Pal.MUTED, a), 2.8f, bold = true, right = true)
-            fill.color = withAlpha(Pal.CYAN_FAINT, a)
+            label(c, v, lx + lw, ly, withAlpha(if (ok) pal.CYAN else pal.MUTED, a), 2.8f, bold = true, right = true)
+            fill.color = withAlpha(pal.CYAN_FAINT, a)
             val dx0 = lx + textW(k, 2.8f) + 1.5f * u
             val dx1 = lx + lw - textW(v, 2.8f, bold = true) - 1.5f * u
             var dx = dx0
             while (dx < dx1) { c.drawRect(dx, ly - 0.9f * u, dx + 0.35f * u, ly - 0.55f * u, fill); dx += 1.3f * u }
             ly += 5.2f * u
+        }
+        u = saveU
+    }
+
+    // ───────────────────────── SHUTDOWN ─────────────────────────
+
+    /**
+     * Power-down, the boot sequence in reverse: the speed ring's cells go dark one by one,
+     * the picture collapses into a bright line like an old CRT, the line shrinks to a dot
+     * and fades, then "SYSTEMS OFFLINE" and the trip it just logged.
+     */
+    fun drawShutdown(c: Canvas, w: Float, h: Float, e: Long, tripLine: String?) {
+        val saveU = u
+        u = max(min(h / 100f, w / 172f), 0.1f)
+        c.drawColor(pal.GROUND)
+        val cx = w / 2
+        val cy = h * 0.44f
+
+        if (e < SHUTDOWN_COLLAPSE_MS) {
+            // 1) ring winds down
+            drawGround(c, w, h)
+            val t = (e / SHUTDOWN_COLLAPSE_MS.toFloat()).coerceIn(0f, 1f)
+            val rad = min(w, h) * 0.30f
+            val cells = 45
+            val lit = ((1f - t) * cells).roundToInt()
+            val step = 270f / cells
+            r.set(cx - rad, cy - rad, cx + rad, cy + rad)
+            stroke.shader = null
+            stroke.strokeCap = Paint.Cap.BUTT
+            stroke.strokeWidth = 3.4f * u
+            for (i in 0 until cells) {
+                stroke.color = if (i < lit) pal.CYAN else pal.CELL_OFF
+                c.drawArc(r, 135f + i * step + step * 0.14f, step * 0.72f, false, stroke)
+            }
+            fill.shader = RadialGradient(cx, cy, max(rad, 1f), withAlpha(pal.CYAN, (60 * (1f - t)).toInt()), withAlpha(pal.CYAN, 0), Shader.TileMode.CLAMP)
+            c.drawCircle(cx, cy, rad, fill)
+            fill.shader = null
+            label(c, "POWERING DOWN", cx, cy + 1.2f * u, withAlpha(pal.TEXT, (255 * (1f - t * 0.6f)).toInt()), 3.4f, bold = true, center = true)
+            val dots = ".".repeat(((e / 250) % 4).toInt())
+            label(c, "SAVING TRIP$dots", cx, cy + 7f * u, pal.MUTED, 2.6f, center = true)
+        } else if (e < SHUTDOWN_DOT_MS) {
+            // 2) CRT collapse: a bright line that shrinks to a dot
+            val t = ((e - SHUTDOWN_COLLAPSE_MS) / (SHUTDOWN_DOT_MS - SHUTDOWN_COLLAPSE_MS).toFloat()).coerceIn(0f, 1f)
+            val half = (w * 0.5f) * (1f - easeOut(t))
+            val thick = max(1.5f, 0.8f * u * (1f - t) + 0.4f * u)
+            fill.shader = RadialGradient(cx, cy, max(half + 6f * u, 1f), withAlpha(pal.CYAN, 90), withAlpha(pal.CYAN, 0), Shader.TileMode.CLAMP)
+            c.drawRect(cx - half - 6f * u, cy - 6f * u, cx + half + 6f * u, cy + 6f * u, fill)
+            fill.shader = null
+            fill.color = Color.WHITE
+            c.drawRect(cx - half, cy - thick / 2, cx + half, cy + thick / 2, fill)
+            fill.color = pal.CYAN
+            c.drawCircle(cx, cy, 1.2f * u + thick, fill)
+        } else {
+            // 3) the dot fades; offline + what was logged
+            val t = ((e - SHUTDOWN_DOT_MS) / 700f).coerceIn(0f, 1f)
+            fill.color = withAlpha(pal.CYAN, (255 * (1f - t)).toInt())
+            c.drawCircle(cx, cy, 1.2f * u * (1f - t) + 0.5f, fill)
+            val textIn = ((e - SHUTDOWN_DOT_MS - 150) / 500f).coerceIn(0f, 1f)
+            val word = "SYSTEMS OFFLINE"
+            val typed = (word.length * textIn).toInt()
+            text.typeface = monoBold
+            text.textAlign = Paint.Align.CENTER
+            text.textSize = 5f * u
+            text.letterSpacing = 0.4f
+            text.color = pal.TEXT
+            c.drawText(word.take(typed), cx + text.letterSpacing * text.textSize / 2, cy + 2f * u, text)
+            text.letterSpacing = 0f
+            text.textAlign = Paint.Align.LEFT
+            if (tripLine != null) {
+                val a = (((e - SHUTDOWN_DOT_MS - 500) / 400f).coerceIn(0f, 1f) * 255).toInt()
+                label(c, "TRIP LOGGED · " + tripLine.uppercase(), cx, cy + 9f * u, withAlpha(pal.CYAN, a), 2.8f, center = true)
+            }
         }
         u = saveU
     }
@@ -814,12 +1039,12 @@ class DashRenderer {
         path.lineTo(b.right, b.bottom - cut); path.lineTo(b.right - cut, b.bottom); path.lineTo(b.left + cut, b.bottom)
         path.lineTo(b.left, b.bottom - cut); path.lineTo(b.left, b.top + cut); path.close()
         fill.shader = null
-        fill.color = Pal.GLASS
+        fill.color = pal.GLASS
         c.drawPath(path, fill)
         stroke.shader = null
         stroke.strokeCap = Paint.Cap.BUTT
         stroke.strokeWidth = 0.25f * u
-        stroke.color = Pal.CYAN_DIM
+        stroke.color = pal.CYAN_DIM
         c.drawPath(path, stroke)
 
         // scan line: one slow pass every 6 s, very faint
@@ -827,7 +1052,7 @@ class DashRenderer {
         val y = b.top + b.height() * t
         val y0 = max(b.top, y - 4f * u)
         if (y > y0) {
-            fill.shader = LinearGradient(0f, y0, 0f, y, withAlpha(Pal.CYAN, 0), withAlpha(Pal.CYAN, 22), Shader.TileMode.CLAMP)
+            fill.shader = LinearGradient(0f, y0, 0f, y, withAlpha(pal.CYAN, 0), withAlpha(pal.CYAN, 22), Shader.TileMode.CLAMP)
             c.drawRect(b.left + cut, y0, b.right - cut, y, fill)
             fill.shader = null
         }
@@ -835,7 +1060,7 @@ class DashRenderer {
         // corner brackets sitting on the cut corners
         stroke.strokeCap = Paint.Cap.SQUARE
         stroke.strokeWidth = 0.55f * u
-        stroke.color = Pal.CYAN
+        stroke.color = pal.CYAN
         val l = 4.2f * u
         c.drawLine(b.left + cut, b.top, b.left + cut + l, b.top, stroke); c.drawLine(b.left, b.top + cut, b.left, b.top + cut + l, stroke)
         c.drawLine(b.right - cut - l, b.top, b.right - cut, b.top, stroke); c.drawLine(b.right, b.top + cut, b.right, b.top + cut + l, stroke)
@@ -860,9 +1085,9 @@ class DashRenderer {
     /** Section header: a short cyan tick, then the label in spaced mono. */
     private fun tickHeader(c: Canvas, s: String, x: Float, y: Float) {
         fill.shader = null
-        fill.color = Pal.CYAN
+        fill.color = pal.CYAN
         c.drawRect(x, y - 1.3f * u, x + 2.6f * u, y - 0.8f * u, fill)
-        label(c, s, x + 3.8f * u, y, Pal.CYAN, 2.6f, bold = true)
+        label(c, s, x + 3.8f * u, y, pal.CYAN, 2.6f, bold = true)
     }
 
     private fun segArc(c: Canvas, cx: Float, cy: Float, rad: Float, start: Float, sweep: Float, cells: Int, frac: Float, thick: Float) {
@@ -873,7 +1098,7 @@ class DashRenderer {
         stroke.strokeCap = Paint.Cap.BUTT
         stroke.strokeWidth = thick
         for (i in 0 until cells) {
-            stroke.color = if (i < lit) Pal.CYAN else Pal.CELL_OFF
+            stroke.color = if (i < lit) pal.CYAN else pal.CELL_OFF
             c.drawArc(r, start + i * step + step * 0.15f, step * 0.7f, false, stroke)
         }
     }
@@ -887,13 +1112,13 @@ class DashRenderer {
         fill.shader = null
         for (i in 0 until cells) {
             val l = b.left + i * (cw + gap)
-            fill.color = if (i < lit) Pal.CYAN else Pal.CELL_OFF
+            fill.color = if (i < lit) pal.CYAN else pal.CELL_OFF
             c.drawRect(l, b.top, l + cw, b.bottom, fill)
         }
     }
 
     private fun divider(c: Canvas, x1: Float, y: Float, x2: Float) {
-        fill.shader = LinearGradient(x1, 0f, x2, 0f, intArrayOf(Pal.CYAN_DIM, Pal.CYAN_FAINT, withAlpha(Pal.CYAN, 0)), null, Shader.TileMode.CLAMP)
+        fill.shader = LinearGradient(x1, 0f, x2, 0f, intArrayOf(pal.CYAN_DIM, pal.CYAN_FAINT, withAlpha(pal.CYAN, 0)), null, Shader.TileMode.CLAMP)
         c.drawRect(x1, y - 0.12f * u, x2, y + 0.12f * u, fill)
         fill.shader = null
     }
@@ -928,7 +1153,7 @@ class DashRenderer {
         val ar = b.width.toFloat() / max(1, b.height)
         if (ar > 1) { val h = r2.width() / ar; val d = (r2.height() - h) / 2; r2.top += d; r2.bottom -= d }
         else { val w = r2.height() * ar; val d = (r2.width() - w) / 2; r2.left += d; r2.right -= d }
-        bmpPaint.colorFilter = PorterDuffColorFilter(Pal.TEXT, PorterDuff.Mode.SRC_IN)
+        bmpPaint.colorFilter = PorterDuffColorFilter(pal.TEXT, PorterDuff.Mode.SRC_IN)
         c.drawBitmap(b, null, r2, bmpPaint)
         bmpPaint.colorFilter = null
     }
@@ -991,7 +1216,12 @@ class DashRenderer {
     private fun withAlpha(color: Int, a: Int) = (color and 0x00FFFFFF) or (a.coerceIn(0, 255) shl 24)
 
     companion object {
+        val DAY = Palette(false)
+        val NIGHT = Palette(true)
         const val INTRO_HOLD_MS = 2400
         const val INTRO_MS = 3000
+        const val SHUTDOWN_COLLAPSE_MS = 1100
+        const val SHUTDOWN_DOT_MS = 1600
+        const val SHUTDOWN_MS = 2700
     }
 }

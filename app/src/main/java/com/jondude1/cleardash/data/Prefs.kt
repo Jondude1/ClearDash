@@ -90,6 +90,9 @@ object Prefs {
     var spotsJson: String
         get() = sp.getString("spots", "[]") ?: "[]"
         set(v) { sp.edit().putString("spots", v).apply() }
+    var placeNamesJson: String
+        get() = sp.getString("place_names", "{}") ?: "{}"
+        set(v) { sp.edit().putString("place_names", v).apply() }
     var parkedJson: String
         get() = sp.getString("parked", "") ?: ""
         set(v) { sp.edit().putString("parked", v).apply() }
@@ -133,6 +136,25 @@ object Prefs {
     var coSystems: Boolean
         get() = sp.getBoolean("co_sys", true)
         set(v) = edit { putBoolean("co_sys", v) }
+
+    // Look
+    /** Night red mode: 0 = off, 1 = auto (follows the car's night mode / sunset), 2 = always. */
+    var nightMode: Int
+        get() = sp.getInt("night_mode", 1)
+        set(v) = edit { putInt("night_mode", v) }
+
+    // Navigation shortcuts
+    var homeAddr: String
+        get() = sp.getString("home_addr", "") ?: ""
+        set(v) = edit { putString("home_addr", v.trim()) }
+    var workAddr: String
+        get() = sp.getString("work_addr", "") ?: ""
+        set(v) = edit { putString("work_addr", v.trim()) }
+
+    /** endedAt of a trip whose shutdown + debrief hasn't been shown on the phone yet. */
+    var debriefPending: Long
+        get() = sp.getLong("debrief_pending", 0L)
+        set(v) { sp.edit().putLong("debrief_pending", v).apply() }
 
     var lastUpdateCheck: Long
         get() = sp.getLong("upd_check", 0L)
