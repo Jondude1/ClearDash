@@ -1,6 +1,5 @@
 package com.jondude1.cleardash.car
 
-import android.graphics.BitmapFactory
 import android.graphics.Rect
 import android.graphics.RectF
 import android.os.Handler
@@ -37,7 +36,7 @@ import kotlin.math.ln
  * The main car screen: a custom-drawn dashboard.
  *
  * Built for the CX-5 commander knob, since Mazda locks the touchscreen while moving:
- *  • Nudge the knob to reach the side buttons (Drive / Gauges / Tires) and the
+ *  • Nudge the knob to reach the side buttons (Drive / Systems) and the
  *    media buttons (back · play/pause · forward); press the knob to select.
  *  • Select the "move" button, then simply turn the knob to flip between views.
  *  • Parked, tapping the screen also flips views.
@@ -66,11 +65,7 @@ class DashScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback, DefaultLifecyc
 
     init {
         lifecycle.addObserver(this)
-        renderer.carPhoto = try {
-            BitmapFactory.decodeResource(carContext.resources, R.drawable.cx5_blue)
-        } catch (_: Exception) {
-            null
-        }
+        renderer.loadAssets(carContext)
         carContext.getCarService(AppManager::class.java).setSurfaceCallback(this)
         // Rebuild the buttons only when the media controls actually need to change.
         lifecycleScope.launch {
@@ -183,7 +178,6 @@ class DashScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback, DefaultLifecyc
         val strip = ActionStrip.Builder()
             .addAction(action(R.drawable.ic_stat) { setMode(DashMode.DASH) })
             .addAction(action(R.drawable.ic_act_gauges) { setMode(DashMode.GAUGES) })
-            .addAction(action(R.drawable.ic_act_tire) { setMode(DashMode.TIRES) })
             .build()
         val b = NavigationTemplate.Builder().setActionStrip(strip)
 

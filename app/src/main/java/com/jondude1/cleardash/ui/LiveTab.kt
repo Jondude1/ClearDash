@@ -1,9 +1,8 @@
 package com.jondude1.cleardash.ui
 
-import android.graphics.BitmapFactory
 import android.graphics.RectF
 import androidx.compose.ui.platform.LocalContext
-import com.jondude1.cleardash.R
+import com.jondude1.cleardash.Features
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -44,11 +43,7 @@ import kotlin.math.roundToInt
 fun LiveTab() {
     val state by DataHub.state.collectAsState()
     val ctx = LocalContext.current
-    val renderer = remember {
-        DashRenderer().apply {
-            carPhoto = try { BitmapFactory.decodeResource(ctx.resources, R.drawable.cx5_blue) } catch (_: Exception) { null }
-        }
-    }
+    val renderer = remember { DashRenderer().loadAssets(ctx) }
     var mode by remember { mutableStateOf(DashMode.DASH) }
     var tick by remember { mutableLongStateOf(0L) }
     LaunchedEffect(Unit) {
@@ -65,8 +60,7 @@ fun LiveTab() {
                 .padding(horizontal = 16.dp)
                 .fillMaxWidth()
                 .aspectRatio(5f / 3f) // CX-5 screen: 800×480
-                .clip(RoundedCornerShape(18.dp))
-                .border(1.dp, C.edge, RoundedCornerShape(18.dp))
+                .border(1.dp, C.edge.copy(alpha = 0.45f))
                 .clickableNoRipple { mode = DashMode.entries[(mode.ordinal + 1) % DashMode.entries.size] }
         ) {
             tick.let { } // redraw every frame for smooth needle motion
@@ -80,8 +74,8 @@ fun LiveTab() {
                 .padding(16.dp, 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Segmented(listOf("Dash", "Gauges", "Tires"), mode.ordinal) { mode = DashMode.entries[it] }
-            Text("Exactly what your CX-5 shows", color = C.muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+            Segmented(listOf("Drive", "Systems"), mode.ordinal) { mode = DashMode.entries[it] }
+            Text("LIVE · SAME AS YOUR CX-5", color = C.muted, fontFamily = HoloMono, fontSize = 11.sp, letterSpacing = 1.2.sp, modifier = Modifier.padding(top = 8.dp))
         }
 
         if (state.activeAlerts.isNotEmpty()) {
@@ -112,8 +106,10 @@ fun LiveTab() {
             StatusLine("Speed limit", state.speedLimitMph?.let { "$it mph" } ?: "Unknown", state.speedLimitMph != null)
             StatusLine("Turn-by-turn", state.nav?.let { it.distance.ifEmpty { "Active" } } ?: "No route", state.nav != null)
             StatusLine("OBD (Veepeak)", state.obd.status, state.obd.connected)
-            val fresh = state.tires.values.count { System.currentTimeMillis() - it.seenAt < 120_000 }
-            StatusLine("Tire sensors", if (state.tires.isEmpty()) "None heard yet" else "$fresh of 4 reporting", fresh > 0)
+            if (Features.TIRES) {
+                val fresh = state.tires.values.count { System.currentTimeMillis() - it.seenAt < 120_000 }
+                StatusLine("Tire sensors", if (state.tires.isEmpty()) "None heard yet" else "$fresh of 4 reporting", fresh > 0)
+            }
             StatusLine("Now playing", state.media?.appName ?: "Nothing playing", state.media != null)
         }
     }

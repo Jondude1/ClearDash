@@ -5,6 +5,7 @@ import android.content.Intent
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.jondude1.cleardash.ClearDashApp
+import com.jondude1.cleardash.Features
 import com.jondude1.cleardash.R
 import com.jondude1.cleardash.ui.MainActivity
 import kotlinx.coroutines.delay
@@ -28,7 +29,7 @@ object AlertEngine {
         val active = mutableListOf<CarAlert>()
 
         // Tires
-        for ((wheel, t) in s.tires) {
+        if (Features.TIRES) for ((wheel, t) in s.tires) {
             if (now - t.seenAt > 10 * 60_000) continue
             val hist = psiHistory.getOrPut(wheel) { ArrayDeque() }
             hist.addLast(now to t.psi)
@@ -49,7 +50,7 @@ object AlertEngine {
 
         // Engine
         val o = s.obd
-        if (o.connected) {
+        if (Features.OBD_ALERTS && o.connected) {
             o.coolantF?.let { if (it >= 230f) active += CarAlert("coolant", "Engine running hot", "Coolant ${it.roundToInt()}°F", Severity.CRITICAL) }
             val v = o.voltage
             val rpm = o.rpm ?: 0

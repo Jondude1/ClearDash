@@ -1,5 +1,7 @@
 package com.jondude1.cleardash.data
 
+import com.jondude1.cleardash.Features
+
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
@@ -82,7 +84,7 @@ object AutoSelector {
     val state: StateFlow<AutoSelectState> = _state
 
     fun needsSetup(): Boolean =
-        Prefs.obdAddress == null || Wheel.entries.count { Prefs.tireId(it) != null } < 4
+        Prefs.obdAddress == null || (Features.TIRES && Wheel.entries.count { Prefs.tireId(it) != null } < 4)
 
     @SuppressLint("MissingPermission")
     suspend fun scanAndSelect(context: Context, scanMs: Long = 45_000) {
@@ -110,8 +112,8 @@ object AutoSelector {
             val seen = TpmsRegistry.seen.value
 
             // ── SELECT + VERIFY: tire caps (passive stability check) ──
-            _state.update { it.copy(phase = "Verifying tire caps…") }
-            val candidates = seen.values.filter {
+            if (Features.TIRES) _state.update { it.copy(phase = "Verifying tire caps…") }
+            val candidates = if (!Features.TIRES) emptyList() else seen.values.filter {
                 it.decoded != null && it.seenCount >= 3 && now - it.lastSeen <= 15_000
             }
             _state.update { it.copy(tpmsFound = candidates.size) }
@@ -142,7 +144,7 @@ object AutoSelector {
                 Prefs.tpmsAutoSet = if (selected.size >= Prefs.tpmsAutoSet.size) selected.map { it.address } else merged
             }
             _state.update { it.copy(tpmsVerified = selected.size) }
-            notes += when {
+            if (Features.TIRES) notes += when {
                 selected.size >= 4 -> "All 4 tire caps verified ✓"
                 selected.isEmpty() -> "No tire caps passed verification — screw the caps on to wake them, stand by the car and re-run."
                 else -> "Found ${selected.size} of 4 verified caps — the rest didn't report a stable pressure during the scan."

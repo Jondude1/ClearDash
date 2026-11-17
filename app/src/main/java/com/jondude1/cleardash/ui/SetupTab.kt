@@ -61,6 +61,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.jondude1.cleardash.data.DataService
 import com.jondude1.cleardash.BuildConfig
+import com.jondude1.cleardash.Features
 import com.jondude1.cleardash.data.DataHub
 import com.jondude1.cleardash.data.AutoSelector
 import com.jondude1.cleardash.data.Prefs
@@ -110,7 +111,7 @@ fun SetupTab() {
         DevicesAutoCard(prefsVersion)
         VerifyAllCard(prefsVersion)
         ObdCard(prefsVersion)
-        TiresCard(prefsVersion)
+        if (Features.TIRES) TiresCard(prefsVersion)
         SettingsBackupCard(prefsVersion)
         UpdatesCard()
     }
@@ -180,9 +181,9 @@ private fun AndroidAutoCard() {
 private fun KnobCard() {
     SectionCard("Commander knob", "Mazda locks the touchscreen while you drive, so everything works from the knob.") {
         val tips = listOf(
-            "Nudge" to "Move between the side buttons — Drive, Gauges, Tires — and the media buttons.",
+            "Nudge" to "Move between the side buttons — Drive and Systems — and the media buttons.",
             "Press" to "Select the highlighted button.",
-            "Turn" to "Select the ✥ move button, then turn the knob to flip between Drive, Gauges and Tires.",
+            "Turn" to "Select the ✥ move button, then turn the knob to flip between Drive and Systems.",
             "Back" to "The Back button by the knob returns to the previous screen.",
         )
         tips.forEach { (k, v) ->
@@ -204,9 +205,11 @@ private fun VehicleCard(prefsVersion: Int) {
             value = name, onValueChange = { name = it; Prefs.carName = it }, singleLine = true,
             label = { Text("Name shown on the dash") }, modifier = Modifier.fillMaxWidth(),
         )
-        Text("Door-sticker tire pressure: ${target.roundToInt()} PSI", color = C.text, fontSize = 14.sp)
-        Slider(value = target, onValueChange = { target = it }, onValueChangeFinished = { Prefs.targetPsi = target.roundToInt() },
-            valueRange = 30f..44f, steps = 13)
+        if (Features.TIRES) {
+            Text("Door-sticker tire pressure: ${target.roundToInt()} PSI", color = C.text, fontSize = 14.sp)
+            Slider(value = target, onValueChange = { target = it }, onValueChangeFinished = { Prefs.targetPsi = target.roundToInt() },
+                valueRange = 30f..44f, steps = 13)
+        }
         Text("Fuel tank", color = C.text, fontSize = 14.sp)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(14.8f to "14.8 gal · FWD", 15.3f to "15.3 gal · AWD").forEach { (gal, label) ->
@@ -214,7 +217,7 @@ private fun VehicleCard(prefsVersion: Int) {
                 Pill(label, if (on) C.cyan else C.muted) { Prefs.tankGal = gal }
             }
         }
-        Hint("Used for the gallons-left estimate. Check the sticker on your driver's door jamb for tire pressure.")
+        Hint("Used for the gallons-left estimate.")
     }
 }
 
@@ -229,7 +232,7 @@ private fun DevicesAutoCard(prefsVersion: Int) {
     var wizard by remember { mutableStateOf(false) }
     @Suppress("UNUSED_EXPRESSION") prefsVersion // recompose when any pref changes
 
-    SectionCard("Devices", "ClearDash finds and checks your VePEAK and tire caps itself") {
+    SectionCard("Devices", if (Features.TIRES) "ClearDash finds and checks your VePEAK and tire caps itself" else "ClearDash finds and checks your VePEAK itself") {
         val obdLabel = when {
             auto.obdFound != null -> auto.obdFound!! + if (auto.obdVerified) " · verified ✓" else ""
             Prefs.obdAddress != null -> (Prefs.obdName ?: "Adapter saved") + if (Prefs.obdAutoSelected) " · verified ✓" else ""
@@ -238,7 +241,7 @@ private fun DevicesAutoCard(prefsVersion: Int) {
         }
         StatusLine("VePEAK OBD2", obdLabel, if (auto.obdVerified || Prefs.obdAddress != null) true else null)
         val capsVerified = if (auto.lastRun > 0) auto.tpmsVerified else Prefs.tpmsAutoSet.size
-        StatusLine("Tire caps", "$capsVerified of 4 caps verified", if (capsVerified >= 4) true else null)
+        if (Features.TIRES) StatusLine("Tire caps", "$capsVerified of 4 caps verified", if (capsVerified >= 4) true else null)
         if (auto.running && auto.phase.isNotBlank()) Hint(auto.phase)
         if (auto.message.isNotBlank()) Hint(auto.message)
         val unassigned = Prefs.tpmsAutoSet.filter { Prefs.wheelFor(it) == null }
@@ -246,9 +249,9 @@ private fun DevicesAutoCard(prefsVersion: Int) {
             Pill(if (auto.running) "Checking…" else if (Prefs.obdAddress == null && Prefs.tpmsAutoSet.isEmpty()) "Find my devices" else "Re-run check") {
                 if (!auto.running) scope.launch { AutoSelector.scanAndSelect(ctx, 60_000) }
             }
-            if (unassigned.isNotEmpty() && !auto.running) Pill("Assign wheels") { wizard = true }
+            if (Features.TIRES && unassigned.isNotEmpty() && !auto.running) Pill("Assign wheels") { wizard = true }
         }
-        Hint("How verification works: each cap must report a stable, plausible pressure several times during the scan, and the VePEAK must pass a live ELM327 check (ATZ / voltage / engine-data probe) before anything is saved. Nothing is guessed.")
+        if (Features.TIRES) Hint("How verification works: each cap must report a stable, plausible pressure several times during the scan, and the VePEAK must pass a live ELM327 check (ATZ / voltage / engine-data probe) before anything is saved. Nothing is guessed.")
     }
     if (wizard) WheelAssignWizard { wizard = false }
 }
@@ -396,7 +399,9 @@ private fun ObdCard(prefsVersion: Int) {
             ).joinToString(" · "))
         }
         // Check-engine fault codes (read-only — ClearDash never clears codes)
-        if (state.obd.dtcs.isNotEmpty()) {
+        if (!Features.OBD_ALERTS) {
+            // fault codes are parked along with the other OBD warnings
+        } else if (state.obd.dtcs.isNotEmpty()) {
             Text("Fault codes", color = C.text, fontSize = 15.sp)
             state.obd.dtcs.forEach { d ->
                 Column {
@@ -716,7 +721,7 @@ private fun VerifyAllCard(prefsVersion: Int) {
             tr != null && nowMs - tr.seenAt < 120_000
         }
         val capsPass = assigned == 4 && fresh == 4
-        StatusLine(
+        if (Features.TIRES) StatusLine(
             "Tire caps",
             "$fresh of 4 wheels reporting fresh" + if (assigned < 4) " ($assigned of 4 assigned)" else "",
             if (assigned == 0) null else capsPass,
@@ -726,8 +731,8 @@ private fun VerifyAllCard(prefsVersion: Int) {
             Hint(auto.phase.ifBlank { "Running full verification…" })
         } else if (auto.lastRun > 0) {
             Hint(
-                "Last full check: VePEAK ${if (auto.obdVerified) "verified ✓" else "not verified"} · " +
-                    "${auto.tpmsVerified} of 4 caps verified." +
+                "Last full check: VePEAK ${if (auto.obdVerified) "verified ✓" else "not verified"}" +
+                    (if (Features.TIRES) " · ${auto.tpmsVerified} of 4 caps verified." else ".") +
                     if (auto.message.isNotBlank()) " ${auto.message}" else ""
             )
         }

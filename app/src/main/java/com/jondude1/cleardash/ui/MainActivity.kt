@@ -18,6 +18,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -98,9 +99,9 @@ private fun AppRoot() {
                 .padding(horizontal = 20.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("ClearDash", color = C.text, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+            Text("CLEARDASH", color = C.cyan, fontFamily = HoloMono, fontSize = 20.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
             Spacer(Modifier.width(8.dp))
-            Text("v${BuildConfig.VERSION_NAME}", color = C.muted, fontSize = 13.sp)
+            Text("v${BuildConfig.VERSION_NAME}", color = C.muted, fontFamily = HoloMono, fontSize = 12.sp)
             Spacer(Modifier.weight(1f))
             Segmented(listOf("Live", "Setup"), tab) { tab = it }
         }
@@ -114,7 +115,7 @@ private fun AppRoot() {
 fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
     Row(
         Modifier
-            .clip(RoundedCornerShape(50))
+            .border(1.dp, C.edge.copy(alpha = 0.45f))
             .background(C.card)
             .padding(3.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -123,12 +124,12 @@ fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
             val on = i == selected
             Box(
                 Modifier
-                    .clip(RoundedCornerShape(50))
                     .background(if (on) C.cyan.copy(alpha = 0.18f) else C.card)
+                    .then(if (on) Modifier.border(1.dp, C.cyan) else Modifier)
                     .padding(horizontal = 14.dp, vertical = 6.dp)
                     .clickableNoRipple { onSelect(i) }
             ) {
-                Text(label, color = if (on) C.cyan else C.muted, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Text(label.uppercase(), color = if (on) C.cyan else C.muted, fontFamily = HoloMono, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp)
             }
         }
     }
@@ -175,9 +176,7 @@ private fun UpdateBanner() {
 private fun IntroOverlay(onDone: () -> Unit) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val renderer = remember {
-        DashRenderer().apply {
-            carPhoto = try { BitmapFactory.decodeResource(ctx.resources, R.drawable.cx5_blue) } catch (_: Exception) { null }
-        }
+        DashRenderer().loadAssets(ctx)
     }
     val start = remember { System.currentTimeMillis() }
     var now by remember { mutableLongStateOf(start) }

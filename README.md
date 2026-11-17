@@ -22,7 +22,9 @@ An Android Auto dashboard for the CX-5 that pulls everything into one screen:
 - **Settings backup / restore**: export your adapter + cap assignments and preferences as
   text and re-import them after a reinstall, so a forced uninstall no longer wipes your setup
 - **Alerts** for low/leaking tires, overheating and charging problems, on the car screen and the phone
-- **Look**: sporty black + Soul Red — near-black panels, thick segmented gauges, and big high-contrast type that stays readable in daylight on the CX-5's screen
+- **Look**: the ATLAS "Stark" hologram — cyan light on near-black teal glass, cut-corner panels with corner
+  brackets, a reactor-ring speedometer, Space Mono readouts and Sora text — laid out for the CX-5's 800×480 screen
+  and driven entirely from the commander knob
 
 Built by GitHub Actions on every push to `main` and published as a GitHub Release.
 The app checks for new releases and updates itself.
@@ -60,7 +62,15 @@ top to bottom (location, Bluetooth, notification access for turn info).
 > (`KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`); the
 > owner's backup is outside this repo.
 
+## Parked for now
+Tire-cap gauges and OBD2 warnings (engine/charging alerts, check-engine codes) are switched off in
+`Features.kt`. Their code is intact; flip `TIRES` / `OBD_ALERTS` to `true` to bring them back.
+Live engine readouts (RPM, coolant, battery, fuel, load, intake) stay on.
+
 ## Credits
+Fonts: [Space Mono](https://github.com/googlefonts/spacemono) and [Sora](https://github.com/sora-xor/sora-font),
+both under the SIL Open Font License 1.1 (see `FONT-LICENSE-SPACEMONO.txt`, `FONT-LICENSE-SORA.txt`).
+
 CX-5 photo: "2018 Mazda CX-5 2.5L, 4.5.20" by [Ghostofakina](https://commons.wikimedia.org/wiki/User:Ghostofakina),
 via [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:2018_Mazda_CX-5_2.5L,_4.5.20.jpg),
 licensed [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). Modified: background removed,

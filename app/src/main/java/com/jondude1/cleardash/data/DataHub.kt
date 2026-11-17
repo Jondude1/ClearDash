@@ -1,5 +1,7 @@
 package com.jondude1.cleardash.data
 
+import com.jondude1.cleardash.Features
+
 import android.content.Context
 import android.content.Intent
 import android.util.Log
@@ -79,7 +81,7 @@ object DataHub {
         update { it.copy(running = true) }
 
         location = LocationSource(app).also { it.start() }
-        tpms = TpmsSource(app).also { it.startBackground() }
+        if (Features.TIRES) tpms = TpmsSource(app).also { it.startBackground() }
         MediaSource.start(app)
         s.launch { SpeedLimitSource.run() }
         s.launch { ObdSource(app).run() }
