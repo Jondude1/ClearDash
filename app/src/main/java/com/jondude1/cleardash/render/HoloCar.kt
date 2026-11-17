@@ -58,27 +58,32 @@ class HoloCar {
     private val axR = -1.365f
     private val wr = 0.365f
 
-    /** The six long curves, bottom to top centre: y(x) and z(x). */
+    /**
+     * The six long curves, bottom to top centre: y(x) and z(x). Heights and lengths were
+     * measured off a side-on photo of a 2017 KF CX-5 (and checked by overlaying the model on it):
+     * high beltline rising to the rear, side glass ending in a point just behind the rear axle,
+     * windshield set well back, tall nose, high headlights and taillights.
+     */
     private val ly = arrayOf(
-        c(R, 0.40f, -2.05f, 0.35f, -1.75f, 0.30f, -1.0f, 0.25f, 1.0f, 0.25f, 1.75f, 0.30f, 2.05f, 0.32f, F, 0.34f),
-        c(R, 0.66f, -1.4f, 0.64f, 1.4f, 0.60f, F, 0.58f),
-        c(R, 0.96f, -2.10f, 1.04f, -1.6f, 1.10f, 0.0f, 1.05f, 0.9f, 1.01f, 1.4f, 0.97f, 2.0f, 0.92f, 2.2f, 0.88f, F, 0.82f),
-        c(R, 0.98f, -2.20f, 1.08f, -2.05f, 1.18f, -1.6f, 1.18f, 0.0f, 1.12f, 0.9f, 1.08f, 1.3f, 1.03f, 2.0f, 0.97f, 2.2f, 0.92f, F, 0.84f),
-        c(R, 0.99f, -2.20f, 1.10f, -2.10f, 1.28f, -1.97f, 1.46f, -1.85f, 1.53f, -1.4f, 1.585f, -0.6f, 1.63f, 0.0f, 1.60f, 0.30f, 1.49f, 0.92f, 1.085f, 1.3f, 1.035f, 2.0f, 0.965f, 2.2f, 0.915f, F, 0.84f),
-        c(R, 1.00f, -2.20f, 1.11f, -2.10f, 1.30f, -1.97f, 1.48f, -1.85f, 1.56f, -1.4f, 1.62f, -0.6f, 1.675f, 0.0f, 1.645f, 0.30f, 1.53f, 0.92f, 1.08f, 1.3f, 1.03f, 1.8f, 0.98f, 2.1f, 0.93f, 2.2f, 0.90f, F, 0.86f),
+        c(R, 0.40f, -2.1f, 0.36f, -1.8f, 0.32f, -1.0f, 0.29f, 1.0f, 0.29f, 1.8f, 0.31f, 2.1f, 0.32f, F, 0.34f),
+        c(R, 0.62f, -1.4f, 0.70f, 1.4f, 0.66f, F, 0.60f),
+        c(R, 0.98f, -2.1f, 1.10f, -1.6f, 1.19f, -0.4f, 1.14f, 0.65f, 1.11f, 1.5f, 0.99f, 2.05f, 0.90f, 2.2f, 0.87f, F, 0.84f),
+        c(R, 1.03f, -2.20f, 1.15f, -2.0f, 1.24f, -1.6f, 1.27f, -1.27f, 1.255f, -0.4f, 1.215f, 0.65f, 1.18f, 1.0f, 1.12f, 1.5f, 1.04f, 1.8f, 0.99f, 2.05f, 0.955f, 2.2f, 0.93f, F, 0.89f),
+        c(R, 1.07f, -2.20f, 1.20f, -2.08f, 1.30f, -1.85f, 1.50f, -1.69f, 1.60f, -1.5f, 1.62f, -1.0f, 1.65f, -0.5f, 1.655f, 0.0f, 1.645f, 0.13f, 1.625f, 0.40f, 1.42f, 0.65f, 1.185f, 1.0f, 1.125f, 1.5f, 1.05f, 1.8f, 1.00f, 2.05f, 0.96f, 2.2f, 0.935f, F, 0.89f),
+        c(R, 1.10f, -2.20f, 1.22f, -2.08f, 1.32f, -1.85f, 1.52f, -1.69f, 1.635f, -1.5f, 1.655f, -1.0f, 1.68f, -0.5f, 1.685f, 0.0f, 1.675f, 0.15f, 1.655f, 0.45f, 1.48f, 0.85f, 1.14f, 1.3f, 1.08f, 1.8f, 1.01f, 2.1f, 0.96f, 2.22f, 0.93f, F, 0.90f),
     )
     private val lz = arrayOf(
-        c(R, 0.76f, -2.1f, 0.85f, -1.6f, 0.87f, 1.6f, 0.87f, 2.1f, 0.84f, F, 0.76f),
+        c(R, 0.74f, -2.1f, 0.84f, -1.6f, 0.87f, 1.6f, 0.87f, 2.1f, 0.84f, F, 0.74f),
         c(R, 0.80f, -2.15f, 0.90f, -1.4f, 0.925f, -0.6f, 0.905f, 0.6f, 0.905f, 1.35f, 0.92f, 2.1f, 0.89f, F, 0.80f),
-        c(R, 0.76f, -2.15f, 0.86f, -1.5f, 0.90f, 1.35f, 0.905f, 2.0f, 0.86f, 2.2f, 0.80f, F, 0.66f),
-        c(R, 0.66f, -2.1f, 0.78f, -1.8f, 0.82f, 0.9f, 0.84f, 1.3f, 0.78f, 2.0f, 0.74f, 2.2f, 0.66f, F, 0.54f),
-        c(R, 0.50f, -2.1f, 0.58f, -1.85f, 0.64f, 0.0f, 0.66f, 0.30f, 0.68f, 0.92f, 0.62f, 1.3f, 0.46f, 2.2f, 0.40f, F, 0.32f),
+        c(R, 0.72f, -2.15f, 0.86f, -1.5f, 0.905f, 1.35f, 0.905f, 2.0f, 0.87f, 2.2f, 0.80f, F, 0.66f),
+        c(R, 0.62f, -2.15f, 0.76f, -1.9f, 0.83f, 0.65f, 0.85f, 1.0f, 0.82f, 1.8f, 0.78f, 2.2f, 0.66f, F, 0.52f),
+        c(R, 0.50f, -2.1f, 0.56f, -1.85f, 0.62f, 0.0f, 0.68f, 0.13f, 0.70f, 0.65f, 0.70f, 1.0f, 0.50f, 2.2f, 0.42f, F, 0.34f),
         c(R, 0f, F, 0f),
     )
 
     private val stations: FloatArray = run {
         val base = (0 until 34).map { R + (F - R) * it / 33f }
-        (base + listOf(R + 0.02f, R + 0.06f, F - 0.02f, F - 0.06f, 0.92f, 0.30f, -1.85f, -2.10f)).sorted().distinct().toFloatArray()
+        (base + listOf(R + 0.02f, R + 0.06f, F - 0.02f, F - 0.06f, 0.65f, 0.13f, -1.69f, -2.08f, 0.85f, 0.45f)).sorted().distinct().toFloatArray()
     }
     private val ns = stations.size
 
@@ -90,8 +95,8 @@ class HoloCar {
     private val vc = Array(ns) { Array(6) { Array(2) { FloatArray(3) } } }
 
     // the window graphic: on the side surface between sill and roof edge, pointed at the rear
-    private val dloTop = floatArrayOf(0.90f, 1.09f, 0.62f, 1.28f, 0.30f, 1.47f, 0.0f, 1.56f, -0.5f, 1.565f, -1.0f, 1.535f, -1.5f, 1.46f, -1.85f, 1.37f, -2.0f, 1.30f)
-    private val dloBot = floatArrayOf(-2.0f, 1.30f, -1.6f, 1.20f, -1.0f, 1.155f, 0.0f, 1.125f, 0.9f, 1.09f)
+    private val dloTop = floatArrayOf(0.64f, 1.185f, 0.40f, 1.43f, 0.13f, 1.615f, 0.0f, 1.625f, -0.43f, 1.63f, -1.10f, 1.585f, -1.41f, 1.49f, -1.515f, 1.45f)
+    private val dloBot = floatArrayOf(-1.515f, 1.45f, -1.40f, 1.33f, -1.27f, 1.26f, -0.4f, 1.22f, 0.64f, 1.185f)
 
     private fun onSide(x: Float, y: Float): Float {
         val y3 = ly[3](x); val z3 = lz[3](x); val y4 = ly[4](x); val z4 = lz[4](x)
@@ -143,72 +148,83 @@ class HoloCar {
         return out
     }
 
+    /** Black wheel-arch and rocker cladding: (polygon, side). Drawn on the near side only. */
+    private val cladding = ArrayList<Pair<FloatArray, Int>>()
+
+    private fun arcPts(cx: Float, cy: Float, r: Float, z: Float, a0: Double, a1: Double, n: Int) = arc(cx, cy, r, z, a0, a1, n)
+
     init {
         for (s in intArrayOf(1, -1)) {
             val sg = s.toFloat()
             feats.add(Feat(dlo(sg), 1f, CHROME, s))
-            for ((xb, xt) in listOf(-0.30f to -0.24f, -1.40f to -1.50f)) {
+            for ((xb, xt) in listOf(-0.40f to -0.43f, -1.24f to -1.10f)) {   // B pillar, C divider
                 val yb = interp(dloBot, xb); val yt = interp(dloTop, xt)
                 f(0.9f, LINE, s, xb, yb, onSide(xb, yb) * sg, xt, yt, onSide(xt, yt) * sg)
             }
-            // shoulder line, full length
+            // shoulder crease, full length
             val sh = FloatArray(40 * 3)
             for (k in 0 until 40) { val x = -2.15f + 4.3f * k / 39f; sh[k * 3] = x; sh[k * 3 + 1] = ly[2](x); sh[k * 3 + 2] = lz[2](x) * sg }
             feats.add(Feat(sh, 0.9f, LINE, s))
-            // Kodo character: fender crest, down through the doors, up into the rear haunch
-            f(0.55f, LINE, s, 1.95f, 0.82f, 0.885f * sg, 1.35f, 0.86f, 0.915f * sg, 0.8f, 0.80f, 0.91f * sg, 0.0f, 0.74f, 0.905f * sg,
-                -0.9f, 0.80f, 0.91f * sg, -1.5f, 0.90f, 0.92f * sg, -2.0f, 0.93f, 0.88f * sg)
-            // wheel arches with cladding
+            // lower-door Kodo highlight rising into the rear haunch
+            f(0.5f, LINE, s, 1.25f, 0.95f, 0.915f * sg, 0.6f, 0.86f, 0.91f * sg, -0.2f, 0.80f, 0.905f * sg, -0.9f, 0.86f, 0.91f * sg,
+                -1.55f, 0.98f, 0.92f * sg, -2.0f, 1.02f, 0.88f * sg)
+            // thick wheel-arch cladding + rocker band with its chrome strip
             for (ax in floatArrayOf(axF, axR)) {
-                feats.add(Feat(arc(ax, 0.36f, 0.43f, 0.90f * sg, 0.12, PI - 0.12, 18), 0.9f, LINE, s))
-                feats.add(Feat(arc(ax, 0.36f, 0.48f, 0.915f * sg, 0.12, PI - 0.12, 18), 0.5f, LINE, s))
+                val inner = arcPts(ax, wr, 0.42f, 0.905f * sg, -0.25, PI + 0.25, 22)
+                val outer = arcPts(ax, wr, 0.52f, 0.925f * sg, -0.25, PI + 0.25, 22)
+                val band = FloatArray(inner.size + outer.size)
+                System.arraycopy(inner, 0, band, 0, inner.size)
+                for (k in 0 until 22) { val src = (21 - k) * 3; band[inner.size + k * 3] = outer[src]; band[inner.size + k * 3 + 1] = outer[src + 1]; band[inner.size + k * 3 + 2] = outer[src + 2] }
+                cladding.add(band to s)
+                feats.add(Feat(inner, 0.9f, LINE, s)); feats.add(Feat(outer, 0.6f, LINE, s))
             }
-            f(0.4f, LINE, s, -1.82f, 0.33f, 0.87f * sg, -0.93f, 0.31f, 0.875f * sg)
-            f(0.4f, LINE, s, 0.90f, 0.31f, 0.875f * sg, 1.80f, 0.33f, 0.87f * sg)
-            f(0.6f, LINE, s, -0.93f, 0.31f, 0.875f * sg, 0.90f, 0.31f, 0.875f * sg)
-            // door cuts + handles
-            for (x0 in floatArrayOf(0.90f, -0.30f)) f(0.45f, LINE, s, x0, 0.33f, 0.885f * sg, x0 - 0.04f, ly[3](x0), 0.86f * sg)
-            f(0.45f, LINE, s, -1.30f, ly[3](-1.30f), 0.86f * sg, -1.10f, 0.86f, 0.905f * sg, -0.93f, 0.70f, 0.905f * sg)
-            for (hx in floatArrayOf(0.05f, -1.05f)) f(0.6f, LINE, s, hx, 0.98f, 0.905f * sg, hx - 0.17f, 0.985f, 0.905f * sg)
-            // mirror
-            f(0.9f, LINE, s, 0.80f, 1.09f, 0.86f * sg, 0.66f, 1.15f, 1.06f * sg, 0.56f, 1.10f, 1.04f * sg, 0.60f, 1.06f, 0.86f * sg)
+            cladding.add(floatArrayOf(-0.86f, 0.29f, 0.875f * sg, 0.86f, 0.29f, 0.875f * sg, 0.86f, 0.40f, 0.88f * sg, -0.86f, 0.40f, 0.88f * sg) to s)
+            f(0.9f, CHROME, s, -0.86f, 0.40f, 0.885f * sg, 0.86f, 0.40f, 0.885f * sg)
+            f(0.6f, LINE, s, -0.86f, 0.29f, 0.88f * sg, 0.86f, 0.29f, 0.88f * sg)
+            // door cuts, handles, mirror
+            f(0.45f, LINE, s, 0.775f, 0.42f, 0.89f * sg, 0.80f, 0.80f, 0.91f * sg, 0.70f, 1.17f, 0.86f * sg)
+            f(0.45f, LINE, s, -0.40f, 0.42f, 0.89f * sg, -0.40f, 1.21f, 0.86f * sg)
+            f(0.45f, LINE, s, -1.31f, 1.25f, 0.86f * sg, -1.32f, 0.90f, 0.91f * sg)
+            f(0.7f, LINE, s, -0.09f, 1.01f, 0.91f * sg, -0.33f, 1.01f, 0.91f * sg)
+            f(0.7f, LINE, s, -1.06f, 1.08f, 0.91f * sg, -1.30f, 1.08f, 0.91f * sg)
+            f(0.9f, LINE, s, 0.60f, 1.20f, 0.86f * sg, 0.48f, 1.27f, 1.06f * sg, 0.30f, 1.24f, 1.05f * sg, 0.36f, 1.15f, 0.86f * sg)
             // hood creases into the grille corners
-            f(0.6f, LINE, s, 0.98f, 1.07f, 0.40f * sg, 1.6f, 1.0f, 0.39f * sg, 2.2f, 0.89f, 0.37f * sg)
-            // slim headlight, swept back along the fender
-            f(1f, CHROME, s, 2.262f, 0.85f, 0.40f * sg, 2.22f, 0.89f, 0.58f * sg, 2.13f, 0.915f, 0.74f * sg, 1.98f, 0.925f, 0.85f * sg,
-                2.03f, 0.875f, 0.86f * sg, 2.16f, 0.845f, 0.74f * sg, 2.245f, 0.815f, 0.56f * sg, 2.262f, 0.85f, 0.40f * sg)
+            f(0.6f, LINE, s, 0.85f, 1.13f, 0.40f * sg, 1.6f, 1.04f, 0.39f * sg, 2.2f, 0.93f, 0.37f * sg)
+            // slim headlight, high on the fender
+            f(1f, CHROME, s, 2.27f, 0.89f, 0.40f * sg, 2.21f, 0.945f, 0.62f * sg, 2.05f, 0.965f, 0.80f * sg, 1.80f, 0.955f, 0.875f * sg,
+                1.86f, 0.92f, 0.88f * sg, 2.06f, 0.90f, 0.82f * sg, 2.22f, 0.855f, 0.62f * sg, 2.27f, 0.89f, 0.40f * sg)
             // chrome signature wing: up the grille side, out under the headlight
-            f(1f, CHROME, s, 2.282f, 0.52f, 0.36f * sg, 2.278f, 0.62f, 0.44f * sg, 2.272f, 0.74f, 0.48f * sg, 2.24f, 0.80f, 0.60f * sg,
-                2.15f, 0.82f, 0.74f * sg, 2.05f, 0.85f, 0.84f * sg)
-            f(0.6f, LINE, s, 2.24f, 0.42f, 0.52f * sg, 2.18f, 0.48f, 0.70f * sg, 2.10f, 0.46f, 0.78f * sg)
-            // slim wrap-around taillight with twin LED rings
-            f(1f, TAIL, s, -2.24f, 1.04f, 0.36f * sg, -2.21f, 1.07f, 0.62f * sg, -2.12f, 1.09f, 0.82f * sg, -1.98f, 1.11f, 0.88f * sg,
-                -2.02f, 1.05f, 0.87f * sg, -2.16f, 1.02f, 0.78f * sg, -2.24f, 1.00f, 0.52f * sg, -2.24f, 1.04f, 0.36f * sg)
-            for ((rx, rz) in listOf(-2.215f to 0.70f, -2.20f to 0.58f)) {
+            f(1f, CHROME, s, 2.285f, 0.52f, 0.36f * sg, 2.282f, 0.64f, 0.45f * sg, 2.275f, 0.78f, 0.49f * sg, 2.24f, 0.84f, 0.60f * sg,
+                2.14f, 0.87f, 0.74f * sg, 2.0f, 0.895f, 0.84f * sg)
+            f(0.6f, LINE, s, 2.25f, 0.44f, 0.52f * sg, 2.19f, 0.50f, 0.70f * sg, 2.10f, 0.48f, 0.79f * sg)
+            // taillight, high and slim, with twin rings
+            f(1f, TAIL, s, -2.255f, 1.12f, 0.40f * sg, -2.22f, 1.17f, 0.62f * sg, -2.12f, 1.21f, 0.80f * sg, -1.92f, 1.215f, 0.87f * sg,
+                -1.96f, 1.15f, 0.875f * sg, -2.10f, 1.10f, 0.82f * sg, -2.22f, 1.075f, 0.62f * sg, -2.255f, 1.12f, 0.40f * sg)
+            for ((rx, rz) in listOf(-2.20f to 0.70f, -2.17f to 0.58f)) {
                 val p = FloatArray(13 * 3)
-                for (k in 0..12) { val t = 2 * PI * k / 12; p[k * 3] = rx; p[k * 3 + 1] = 1.045f + 0.022f * sin(t).toFloat(); p[k * 3 + 2] = (rz + 0.035f * cos(t).toFloat()) * sg }
+                for (k in 0..12) { val t = 2 * PI * k / 12; p[k * 3] = rx; p[k * 3 + 1] = 1.14f + 0.024f * sin(t).toFloat(); p[k * 3 + 2] = (rz + 0.035f * cos(t).toFloat()) * sg }
                 feats.add(Feat(p, 0.9f, TAIL, s))
             }
             // twin exhausts
             val ex = FloatArray(15 * 3)
-            for (k in 0..14) { val t = 2 * PI * k / 14; ex[k * 3] = -2.27f; ex[k * 3 + 1] = 0.42f + 0.045f * sin(t).toFloat(); ex[k * 3 + 2] = (0.58f + 0.07f * cos(t).toFloat()) * sg }
+            for (k in 0..14) { val t = 2 * PI * k / 14; ex[k * 3] = -2.27f; ex[k * 3 + 1] = 0.43f + 0.045f * sin(t).toFloat(); ex[k * 3 + 2] = (0.58f + 0.07f * cos(t).toFloat()) * sg }
             feats.add(Feat(ex, 0.7f, LINE, s))
             glass.add(dlo(sg))
         }
         // the shield grille: flat top, widest at the headlights, flat bottom
-        f(1f, CHROME, 0, 2.272f, 0.85f, 0.36f, 2.272f, 0.85f, -0.36f, 2.275f, 0.74f, -0.46f, 2.28f, 0.56f, -0.42f, 2.284f, 0.50f, -0.34f,
-            2.285f, 0.50f, 0.34f, 2.28f, 0.56f, 0.42f, 2.275f, 0.74f, 0.46f, 2.272f, 0.85f, 0.36f)
-        for (gy in floatArrayOf(0.56f, 0.62f, 0.68f, 0.74f, 0.80f)) f(0.30f, LINE, 0, 2.278f, gy, 0.40f, 2.278f, gy, -0.40f)
-        f(0.5f, LINE, 0, 2.27f, 0.40f, 0.46f, 2.27f, 0.40f, -0.46f)
+        f(1f, CHROME, 0, 2.272f, 0.88f, 0.38f, 2.272f, 0.88f, -0.38f, 2.275f, 0.76f, -0.47f, 2.28f, 0.56f, -0.43f, 2.284f, 0.50f, -0.34f,
+            2.285f, 0.50f, 0.34f, 2.28f, 0.56f, 0.43f, 2.275f, 0.76f, 0.47f, 2.272f, 0.88f, 0.38f)
+        for (gy in floatArrayOf(0.57f, 0.63f, 0.69f, 0.75f, 0.81f)) f(0.30f, LINE, 0, 2.279f, gy, 0.42f, 2.279f, gy, -0.42f)
+        f(0.5f, LINE, 0, 2.27f, 0.40f, 0.48f, 2.27f, 0.40f, -0.48f)
         // windshield, rear glass, spoiler, plate, tail bar
-        val ws = floatArrayOf(0.92f, ly[4](0.92f), lz[4](0.92f), 0.30f, ly[4](0.30f), lz[4](0.30f), 0.30f, ly[4](0.30f), -lz[4](0.30f), 0.92f, ly[4](0.92f), -lz[4](0.92f))
-        val rg = floatArrayOf(-1.95f, 1.46f, 0.60f, -2.11f, 1.29f, 0.55f, -2.11f, 1.29f, -0.55f, -1.95f, 1.46f, -0.60f)
+        val ws = floatArrayOf(0.65f, ly[4](0.65f), lz[4](0.65f), 0.13f, ly[4](0.13f), lz[4](0.13f), 0.13f, ly[4](0.13f), -lz[4](0.13f), 0.65f, ly[4](0.65f), -lz[4](0.65f))
+        val rg = floatArrayOf(-1.69f, 1.60f, 0.58f, -2.08f, 1.29f, 0.54f, -2.08f, 1.29f, -0.54f, -1.69f, 1.60f, -0.58f)
         glass.add(ws); glass.add(rg)
         feats.add(Feat(ws + ws.copyOfRange(0, 3), 0.7f, LINE, 0))
         feats.add(Feat(rg + rg.copyOfRange(0, 3), 0.8f, LINE, 0))
-        f(0.8f, LINE, 0, -1.86f, 1.55f, 0.62f, -1.93f, 1.555f, 0f, -1.86f, 1.55f, -0.62f)
-        f(0.5f, LINE, 0, -2.26f, 0.92f, 0.26f, -2.26f, 0.92f, -0.26f, -2.27f, 0.78f, -0.26f, -2.27f, 0.78f, 0.26f, -2.26f, 0.92f, 0.26f)
-        f(0.6f, LINE, 0, -2.25f, 1.04f, 0.36f, -2.25f, 1.04f, -0.36f)
+        f(0.8f, LINE, 0, -1.66f, 1.635f, 0.62f, -1.73f, 1.64f, 0f, -1.66f, 1.635f, -0.62f)
+        f(0.5f, LINE, 0, -2.26f, 1.00f, 0.26f, -2.26f, 1.00f, -0.26f, -2.27f, 0.86f, -0.26f, -2.27f, 0.86f, 0.26f, -2.26f, 1.00f, 0.26f)
+        f(0.6f, LINE, 0, -2.255f, 1.12f, 0.40f, -2.255f, 1.12f, -0.40f)
     }
 
     // ───────────────────────── live state ─────────────────────────
@@ -406,6 +422,24 @@ class HoloCar {
             path.close()
             val da = depthA(dsum / n)
             fill.color = withAlpha(glassCol, (70 * da * da).toInt())
+            c.drawPath(path, fill)
+        }
+
+        // black cladding on the near side: wheel arches and rocker
+        cam(0f, 0.6f, 1f, true, p0); cam(0f, 0.6f, 0f, true, p1)
+        val near = if ((p0[0] - p1[0]) * -p1[0] + (p0[1] - p1[1]) * -p1[1] + (p0[2] - p1[2]) * -p1[2] > 0) 1 else -1
+        for ((poly, side) in cladding) {
+            if (side != near) continue
+            path.reset()
+            var dsum = 0f
+            val n = poly.size / 3
+            for (p in 0 until n) {
+                cam(poly[p * 3], poly[p * 3 + 1], poly[p * 3 + 2], true, p0)
+                dsum += p0[2]
+                if (p == 0) path.moveTo(sx(p0), sy(p0)) else path.lineTo(sx(p0), sy(p0))
+            }
+            path.close()
+            fill.color = withAlpha(pal.GROUND, (190 * depthA(dsum / n)).toInt())
             c.drawPath(path, fill)
         }
 
