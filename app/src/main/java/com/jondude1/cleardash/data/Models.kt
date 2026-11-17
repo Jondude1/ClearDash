@@ -81,6 +81,8 @@ data class VehicleState(
     val media: MediaInfo? = null,
     val speedMph: Float? = null,
     val gpsOk: Boolean = false,
+    /** GPS course over ground, degrees clockwise from north (null until moving). */
+    val bearing: Float? = null,
     val lat: Double? = null,
     val lon: Double? = null,
     val speedLimitMph: Int? = null,

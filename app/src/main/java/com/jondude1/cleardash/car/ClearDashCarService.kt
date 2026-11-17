@@ -15,7 +15,9 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import com.jondude1.cleardash.data.CarAlert
+import com.jondude1.cleardash.data.Callouts
 import com.jondude1.cleardash.data.DataHub
+import com.jondude1.cleardash.data.Trips
 import kotlinx.coroutines.launch
 
 class ClearDashCarService : CarAppService() {
@@ -33,9 +35,13 @@ class DashSession : Session() {
             override fun onCreate(owner: LifecycleOwner) {
                 DataHub.acquire()
                 DataHub.startService(carContext)
+                Trips.start()
+                Callouts.start(carContext)
             }
 
             override fun onDestroy(owner: LifecycleOwner) {
+                Callouts.stop()
+                Trips.finish(carContext) // debrief + parking spot, while the last GPS fix is still known
                 DataHub.release()
                 DataHub.stopService(carContext) // car disconnected: stop draining the battery
             }

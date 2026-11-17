@@ -1,5 +1,13 @@
 package com.jondude1.cleardash.ui
 
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.Alignment
+import com.jondude1.cleardash.data.TripSummary
+import com.jondude1.cleardash.data.Trips
 import android.graphics.RectF
 import androidx.compose.ui.platform.LocalContext
 import com.jondude1.cleardash.Features
@@ -101,6 +109,9 @@ fun LiveTab() {
             }
         }
 
+        TripCard()
+        PlacesCard()
+
         SectionCard("Sources") {
             StatusLine("GPS", if (state.gpsOk) "${(state.speedMph ?: 0f).roundToInt()} mph" else "No fix", state.gpsOk)
             StatusLine("Speed limit", state.speedLimitMph?.let { "$it mph" } ?: "Unknown", state.speedLimitMph != null)
@@ -111,6 +122,61 @@ fun LiveTab() {
                 StatusLine("Tire sensors", if (state.tires.isEmpty()) "None heard yet" else "$fresh of 4 reporting", fresh > 0)
             }
             StatusLine("Now playing", state.media?.appName ?: "Nothing playing", state.media != null)
+        }
+    }
+}
+
+@Composable
+private fun TripCard() {
+    val live by Trips.live.collectAsState()
+    var tick by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(10_000); tick++ } }
+    val history = remember(live == null, tick) { Trips.history() }
+    if (live == null && history.isEmpty()) return
+    SectionCard("Trip debrief", live?.let { "Driving · %.1f mi · %s".format(it.distanceMi, TripSummary.fmtDuration(it.totalSec)) }
+        ?: history.first().headline()) {
+        val last = history.firstOrNull()
+        if (live == null && last != null) {
+            last.lines().forEach { (k, v) -> StatusLine(k, v, null) }
+        } else if (live != null) {
+            StatusLine("Average", "${live!!.avgMph.roundToInt()} mph moving", null)
+            StatusLine("Top speed", "${live!!.topMph.roundToInt()} mph", null)
+            StatusLine("Over the limit", if (live!!.overLimitSec < 5) "none" else TripSummary.fmtDuration(live!!.overLimitSec), null)
+        }
+        val older = if (live == null) history.drop(1) else history
+        if (older.isNotEmpty()) {
+            Text("EARLIER", color = C.cyan, fontFamily = HoloMono, fontSize = 11.sp, letterSpacing = 1.6.sp)
+            older.take(5).forEach { t ->
+                val day = java.text.SimpleDateFormat("EEE MMM d, h:mm a", java.util.Locale.US).format(java.util.Date(t.startedAt))
+                StatusLine(day, t.headline(), null)
+            }
+        }
+        Hint("Saved when the car disconnects. ATLAS gets a copy too.")
+    }
+}
+
+@Composable
+private fun PlacesCard() {
+    val ctx = LocalContext.current
+    var version by remember { mutableIntStateOf(0) }
+    val parked = remember(version) { Trips.parked() }
+    val spots = remember(version) { Trips.spots() }
+    if (parked == null && spots.isEmpty()) return
+    SectionCard("Places", "Where you parked and spots you saved") {
+        (listOfNotNull(parked) + spots).take(8).forEach { s ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(if (s === parked) "Parked" else s.note, color = C.text, fontSize = 15.sp)
+                    Text(s.whenText(), color = C.muted, fontSize = 12.sp)
+                }
+                Pill("Map") {
+                    try { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(s.mapsUrl()))) } catch (_: Exception) {}
+                }
+                if (s !== parked) {
+                    Spacer(Modifier.width(6.dp))
+                    Pill("✕", C.muted) { Trips.deleteSpot(s.at); version++ }
+                }
+            }
         }
     }
 }

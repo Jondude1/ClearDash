@@ -53,6 +53,7 @@ class LocationSource(context: Context) : LocationListener {
                 lat = loc.latitude,
                 lon = loc.longitude,
                 speedMph = mph?.let { s -> if (s < 1.2f) 0f else s },
+                bearing = if (loc.hasBearing() && (mph ?: 0f) > 2f) loc.bearing else it.bearing,
             )
         }
     }

@@ -62,6 +62,10 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.jondude1.cleardash.data.DataService
 import com.jondude1.cleardash.BuildConfig
 import com.jondude1.cleardash.Features
+import com.jondude1.cleardash.data.CarMcpServer
+import com.jondude1.cleardash.data.Callouts
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.jondude1.cleardash.data.DataHub
 import com.jondude1.cleardash.data.AutoSelector
 import com.jondude1.cleardash.data.Prefs
@@ -107,6 +111,8 @@ fun SetupTab() {
         PermissionsCard(recheck) { recheck++ }
         AndroidAutoCard()
         KnobCard()
+        AtlasLinkCard()
+        CalloutsCard()
         VehicleCard(prefsVersion)
         DevicesAutoCard(prefsVersion)
         VerifyAllCard(prefsVersion)
@@ -193,6 +199,105 @@ private fun KnobCard() {
             }
         }
         Hint("Parked, you can also tap the dashboard to flip views.")
+    }
+}
+
+@Composable
+private fun AtlasLinkCard() {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val st by CarMcpServer.status.collectAsState()
+    @Suppress("UNUSED_VARIABLE") val pv by Prefs.version.collectAsState()
+    var test by remember { mutableStateOf<String?>(null) }
+    var on by remember { mutableStateOf(Prefs.atlasLink) }
+    var reports by remember { mutableStateOf(Prefs.atlasReports) }
+    val clip = ctx.getSystemService(android.content.ClipboardManager::class.java)
+    fun copy(label: String, v: String) {
+        clip?.setPrimaryClip(android.content.ClipData.newPlainText(label, v))
+        android.widget.Toast.makeText(ctx, "$label copied", android.widget.Toast.LENGTH_SHORT).show()
+    }
+
+    SectionCard("ATLAS link", "Ask ATLAS about the car through your earbuds or glasses") {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Car connection for ATLAS", color = C.text, fontSize = 15.sp)
+                Hint("Only this phone can reach it, and only with the token.")
+            }
+            Switch(checked = on, onCheckedChange = {
+                on = it; Prefs.atlasLink = it
+                if (it) CarMcpServer.start() else CarMcpServer.stop()
+            })
+        }
+        StatusLine("Server", when {
+            st.listening -> "Listening"
+            st.error != null -> "Error: ${st.error}"
+            else -> "Off"
+        }, if (st.listening) true else if (st.error != null) false else null)
+        if (st.lastCallAt > 0) {
+            val mins = (System.currentTimeMillis() - st.lastCallAt) / 60_000
+            StatusLine("Last ATLAS request", "${st.lastTool ?: "?"} · " + if (mins < 1) "just now" else "$mins min ago", true)
+        }
+        if (on) {
+            Text("ADD IN ATLAS → SETTINGS → CONNECTIONS", color = C.cyan, fontFamily = HoloMono, fontSize = 11.sp, letterSpacing = 1.4.sp)
+            StatusLine("Name", "ClearDash", null)
+            StatusLine("Address", CarMcpServer.URL, null)
+            StatusLine("Token", Prefs.mcpToken.take(6) + "…", null)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Pill("Copy address") { copy("Address", CarMcpServer.URL) }
+                Pill("Copy token") { copy("Token", Prefs.mcpToken) }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Pill("Test") {
+                    test = "Testing…"
+                    scope.launch { test = withContext(Dispatchers.IO) { CarMcpServer.selfTest() } }
+                }
+                Pill("New token", C.muted) { Prefs.resetMcpToken(); test = "New token made — paste it into ATLAS again." }
+            }
+            test?.let { Hint(it) }
+            Hint("Then say \"Atlas, how's the engine?\", \"what's my ETA?\", \"skip this song\", \"where did I park?\" or \"mark this spot\". " +
+                "Live answers work while ClearDash is running in the car; trips and parking are remembered after.")
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Send trip debriefs to ATLAS", color = C.text, fontSize = 15.sp)
+                Hint("Each finished drive and where you parked go to ATLAS's hub on Obelisk.")
+            }
+            Switch(checked = reports, onCheckedChange = { reports = it; Prefs.atlasReports = it })
+        }
+    }
+}
+
+@Composable
+private fun ToggleRow(title: String, sub: String, value: Boolean, set: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = C.text, fontSize = 15.sp)
+            Hint(sub)
+        }
+        Switch(checked = value, onCheckedChange = set)
+    }
+}
+
+@Composable
+private fun CalloutsCard() {
+    val ctx = LocalContext.current
+    @Suppress("UNUSED_VARIABLE") val pv by Prefs.version.collectAsState()
+    SectionCard("Spoken callouts", "Short spoken updates in the car, J.A.R.V.I.S. style") {
+        ToggleRow("Callouts", "Master switch", Prefs.coVoice) { Prefs.coVoice = it }
+        if (Prefs.coVoice) {
+            ToggleRow("Startup greeting", "\"Good morning. ClearDash online.\"", Prefs.coGreeting) { Prefs.coGreeting = it }
+            Text("Speed limit changes", color = C.text, fontSize = 15.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(0, 1, 2).forEach { m ->
+                    Pill(Callouts.limitModeLabel(m), if (Prefs.coLimit == m) C.cyan else C.muted) { Prefs.coLimit = m }
+                }
+            }
+            ToggleRow("Low fuel", "At 15% and 10%, with gallons left (needs the VePEAK)", Prefs.coFuel) { Prefs.coFuel = it }
+            ToggleRow("Break reminder", "Every 2 hours of driving", Prefs.coLongDrive) { Prefs.coLongDrive = it }
+            ToggleRow("System events", "\"Engine telemetry online.\" \"Route acquired.\"", Prefs.coSystems) { Prefs.coSystems = it }
+            Pill("Test voice") { Callouts.test(ctx) }
+        }
+        Hint("Callouts lower the music, wait while you're on a call or Google Maps is speaking, and can be muted for a drive from the ⌘ quick actions on the car screen.")
     }
 }
 

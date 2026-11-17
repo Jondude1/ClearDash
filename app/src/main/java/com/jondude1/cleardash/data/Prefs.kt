@@ -83,6 +83,57 @@ object Prefs {
         get() = sp.getLong("auto_sel_last", 0L)
         set(v) = edit { putLong("auto_sel_last", v) }
 
+    // Stored records (no version bump: nothing needs to re-arm when these change)
+    var tripsJson: String
+        get() = sp.getString("trips", "[]") ?: "[]"
+        set(v) { sp.edit().putString("trips", v).apply() }
+    var spotsJson: String
+        get() = sp.getString("spots", "[]") ?: "[]"
+        set(v) { sp.edit().putString("spots", v).apply() }
+    var parkedJson: String
+        get() = sp.getString("parked", "") ?: ""
+        set(v) { sp.edit().putString("parked", v).apply() }
+
+    // ATLAS link
+    /** Bearer token ATLAS uses for ClearDash's on-phone MCP server. Created on first use. */
+    val mcpToken: String
+        get() {
+            sp.getString("mcp_token", null)?.let { return it }
+            val chars = "abcdefghjkmnpqrstuvwxyz23456789"
+            val rnd = java.security.SecureRandom()
+            val t = (1..28).map { chars[rnd.nextInt(chars.length)] }.joinToString("")
+            sp.edit().putString("mcp_token", t).apply()
+            return t
+        }
+    fun resetMcpToken() = edit { remove("mcp_token") }
+    var atlasLink: Boolean
+        get() = sp.getBoolean("atlas_link", true)
+        set(v) = edit { putBoolean("atlas_link", v) }
+    var atlasReports: Boolean
+        get() = sp.getBoolean("atlas_reports", true)
+        set(v) = edit { putBoolean("atlas_reports", v) }
+
+    // Spoken callouts
+    var coVoice: Boolean
+        get() = sp.getBoolean("co_voice", true)
+        set(v) = edit { putBoolean("co_voice", v) }
+    var coGreeting: Boolean
+        get() = sp.getBoolean("co_greet", true)
+        set(v) = edit { putBoolean("co_greet", v) }
+    /** 0 = off, 1 = when the limit drops, 2 = every change. */
+    var coLimit: Int
+        get() = sp.getInt("co_limit", 1)
+        set(v) = edit { putInt("co_limit", v) }
+    var coFuel: Boolean
+        get() = sp.getBoolean("co_fuel", true)
+        set(v) = edit { putBoolean("co_fuel", v) }
+    var coLongDrive: Boolean
+        get() = sp.getBoolean("co_long", true)
+        set(v) = edit { putBoolean("co_long", v) }
+    var coSystems: Boolean
+        get() = sp.getBoolean("co_sys", true)
+        set(v) = edit { putBoolean("co_sys", v) }
+
     var lastUpdateCheck: Long
         get() = sp.getLong("upd_check", 0L)
         set(v) { sp.edit().putLong("upd_check", v).apply() }

@@ -24,6 +24,7 @@ import com.jondude1.cleardash.data.VehicleState
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
@@ -90,6 +91,7 @@ class DashRenderer {
     private val dateFmt = SimpleDateFormat("EEE · MMM d", Locale.US)
 
     private var shownSpeed = 0f
+    private val holoCar = HoloCar()
     private var lastMode: DashMode? = null
     private var modeChangedAt = 0L
     private var u = 1f // one layout unit ≈ 1% of the drawing height
@@ -448,6 +450,8 @@ class DashRenderer {
             if (nav.eta.isNotEmpty() && avail > 20f * u) {
                 label(c, nav.eta.uppercase(), tx, b.bottom - 0.6f * u, Pal.CYAN_DIM, 2.6f, maxW = tw)
             }
+        } else if (h >= 22f * u) {
+            drawVehicleHolo(c, b, s)
         } else {
             val now = Date()
             tickHeader(c, "SYSTEM TIME", b.left, b.top + 2.6f * u)
@@ -468,6 +472,37 @@ class DashRenderer {
                 label(c, "NO ACTIVE ROUTE · START ONE IN GOOGLE MAPS", b.left, b.bottom - 0.6f * u, Pal.MUTED, 2.5f, maxW = b.width())
             }
         }
+    }
+
+    /** Idle Drive panel: the CX-5 as a live hologram, with heading and g-force readouts. */
+    private fun drawVehicleHolo(c: Canvas, b: RectF, s: VehicleState) {
+        tickHeader(c, Prefs.carName.uppercase() + " // LIVE", b.left, b.top + 2.6f * u)
+        val colW = min(24f * u, b.width() * 0.30f)
+        val carBox = RectF(b.left + colW, b.top + 3.5f * u, b.right, b.bottom - 4f * u)
+        holoCar.update(s)
+        holoCar.draw(c, carBox, u)
+
+        val hdg = s.bearing
+        val dirs = arrayOf("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+        val rows = listOf(
+            "HEADING" to (if (hdg == null) "--" else "%03d° %s".format(hdg.roundToInt() % 360, dirs[(((hdg + 22.5f) % 360f) / 45f).toInt().coerceIn(0, 7)])),
+            "LATERAL" to "%.2f G".format(abs(holoCar.latG)),
+            "THRUST" to when {
+                holoCar.brake > 0.4f -> "BRAKING"
+                holoCar.glow > 0.25f -> "ACCEL"
+                (s.bestSpeed ?: 0f) < 1f -> "PARKED"
+                else -> "CRUISE"
+            },
+        )
+        var y = b.top + 9.5f * u
+        val step = min(9f * u, (b.bottom - 5f * u - y) / rows.size)
+        for ((k, v) in rows) {
+            label(c, k, b.left, y, Pal.MUTED, 2.4f)
+            val col = when (v) { "BRAKING" -> Pal.ALARM; "ACCEL" -> Pal.CYAN; else -> Pal.TEXT }
+            label(c, v, b.left, y + 4.2f * u, col, 3.2f, bold = true, maxW = colW - 1f * u)
+            y += step
+        }
+        label(c, "NO ACTIVE ROUTE · START ONE IN GOOGLE MAPS", b.left, b.bottom - 0.6f * u, Pal.MUTED, 2.4f, maxW = b.width())
     }
 
     private fun drawMedia(c: Canvas, b: RectF, m: MediaInfo) {

@@ -9,6 +9,7 @@ import android.util.Log
 import androidx.car.app.AppManager
 import androidx.car.app.CarContext
 import androidx.car.app.Screen
+import androidx.car.app.ScreenManager
 import androidx.car.app.SurfaceCallback
 import androidx.car.app.SurfaceContainer
 import androidx.car.app.model.Action
@@ -36,7 +37,7 @@ import kotlin.math.ln
  * The main car screen: a custom-drawn dashboard.
  *
  * Built for the CX-5 commander knob, since Mazda locks the touchscreen while moving:
- *  • Nudge the knob to reach the side buttons (Drive / Systems) and the
+ *  • Nudge the knob to reach the side buttons (Drive / Systems / ⌘ quick actions) and the
  *    media buttons (back · play/pause · forward); press the knob to select.
  *  • Select the "move" button, then simply turn the knob to flip between views.
  *  • Parked, tapping the screen also flips views.
@@ -178,6 +179,9 @@ class DashScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback, DefaultLifecyc
         val strip = ActionStrip.Builder()
             .addAction(action(R.drawable.ic_stat) { setMode(DashMode.DASH) })
             .addAction(action(R.drawable.ic_act_gauges) { setMode(DashMode.GAUGES) })
+            .addAction(action(R.drawable.ic_q_quick) {
+                carContext.getCarService(ScreenManager::class.java).push(QuickScreen(carContext))
+            })
             .build()
         val b = NavigationTemplate.Builder().setActionStrip(strip)
 
